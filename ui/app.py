@@ -9,6 +9,8 @@ from ui.widgets import ProjectListFrame
 from ui.tabs.sync_tab import SyncTab
 from ui.tabs.keyframe_tab import KeyFrameTab
 from ui.tabs.animation_tab import AnimationTab
+from ui.tabs.transition_tab import TransitionTab
+from ui.tabs.effect_tab import EffectTab
 from ui.tabs import placeholder
 from core import capcut, settings
 
@@ -75,8 +77,14 @@ class AutoCapcut:
         # Animation tab
         self.animation_tab = AnimationTab(tabview.add("Animation"), app=self)
 
+        # Transitions tab
+        self.transition_tab = TransitionTab(tabview.add("Transitions"), app=self)
+
+        # Effect tab
+        self.effect_tab = EffectTab(tabview.add("Effect"), app=self)
+
         # Placeholder tabs
-        for name in ["Effect", "Transitions", "Captions"]:
+        for name in ["Captions"]:
             placeholder.build(tabview.add(name), name)
 
     def _build_settings_card(self, parent):
