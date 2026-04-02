@@ -25,24 +25,32 @@ CATEGORY_TYPE_MAP = {
 
 
 def scan_library(capcut_path: str | None = None) -> list[AnimationInfo]:
-    """Quét animation library từ CapCut ressdk_db cache.
-
-    Returns list of AnimationInfo sorted by category then name.
-    """
+    """Quét animation library từ CapCut cache. Fallback từ bundled JSON nếu cache trống."""
     if capcut_path is None:
         capcut_path = os.path.join(os.environ.get("LOCALAPPDATA", ""), "CapCut")
 
+    all_anims: dict[str, AnimationInfo] = {}
+
     cache_dir = os.path.join(capcut_path, "User Data", "Cache", "ressdk_db")
-    if not os.path.isdir(cache_dir):
-        return []
+    if os.path.isdir(cache_dir):
+        for db_folder in os.listdir(cache_dir):
+            db_path = os.path.join(cache_dir, db_folder, "rp.db")
+            if os.path.isfile(db_path):
+                _scan_db(db_path, all_anims)
 
-    all_anims: dict[str, AnimationInfo] = {}  # resource_id → info (dedup)
-
-    for db_folder in os.listdir(cache_dir):
-        db_path = os.path.join(cache_dir, db_folder, "rp.db")
-        if not os.path.isfile(db_path):
-            continue
-        _scan_db(db_path, all_anims)
+    # Fallback: nếu cache trống, dùng bundled JSON
+    if not all_anims:
+        from core.library_fallback import load_fallback
+        for item in load_fallback("animations"):
+            rid = item.get("resource_id", "")
+            if rid and rid not in all_anims:
+                all_anims[rid] = AnimationInfo(
+                    name=item.get("name", ""),
+                    resource_id=rid,
+                    category=item.get("category", "In"),
+                    category_id=item.get("category_id", ""),
+                    default_duration=item.get("default_duration", 500000),
+                )
 
     result = list(all_anims.values())
     # Sort: In first, then Out, then Combo, then by name

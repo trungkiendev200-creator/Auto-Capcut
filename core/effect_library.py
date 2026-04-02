@@ -16,19 +16,31 @@ class EffectInfo:
 
 
 def scan_library(capcut_path: str | None = None) -> list[EffectInfo]:
+    """Quét effect library. Fallback từ bundled JSON nếu cache trống."""
     if capcut_path is None:
         capcut_path = os.path.join(os.environ.get("LOCALAPPDATA", ""), "CapCut")
 
-    cache_dir = os.path.join(capcut_path, "User Data", "Cache", "ressdk_db")
-    if not os.path.isdir(cache_dir):
-        return []
-
     all_effects: dict[str, EffectInfo] = {}
 
-    for db_folder in os.listdir(cache_dir):
-        db_path = os.path.join(cache_dir, db_folder, "rp.db")
-        if os.path.isfile(db_path):
-            _scan_db(db_path, all_effects)
+    cache_dir = os.path.join(capcut_path, "User Data", "Cache", "ressdk_db")
+    if os.path.isdir(cache_dir):
+        for db_folder in os.listdir(cache_dir):
+            db_path = os.path.join(cache_dir, db_folder, "rp.db")
+            if os.path.isfile(db_path):
+                _scan_db(db_path, all_effects)
+
+    # Fallback: bundled JSON
+    if not all_effects:
+        from core.library_fallback import load_fallback
+        for item in load_fallback("effects"):
+            rid = item.get("resource_id", "")
+            if rid and rid not in all_effects:
+                all_effects[rid] = EffectInfo(
+                    name=item.get("name", ""),
+                    resource_id=rid,
+                    category=item.get("category", ""),
+                    category_id=item.get("category_id", ""),
+                )
 
     result = list(all_effects.values())
     result.sort(key=lambda e: e.name)

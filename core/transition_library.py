@@ -16,19 +16,31 @@ class TransitionInfo:
 
 
 def scan_library(capcut_path: str | None = None) -> list[TransitionInfo]:
+    """Quét transition library. Fallback từ bundled JSON nếu cache trống."""
     if capcut_path is None:
         capcut_path = os.path.join(os.environ.get("LOCALAPPDATA", ""), "CapCut")
 
-    cache_dir = os.path.join(capcut_path, "User Data", "Cache", "ressdk_db")
-    if not os.path.isdir(cache_dir):
-        return []
-
     all_trans: dict[str, TransitionInfo] = {}
 
-    for db_folder in os.listdir(cache_dir):
-        db_path = os.path.join(cache_dir, db_folder, "rp.db")
-        if os.path.isfile(db_path):
-            _scan_db(db_path, all_trans)
+    cache_dir = os.path.join(capcut_path, "User Data", "Cache", "ressdk_db")
+    if os.path.isdir(cache_dir):
+        for db_folder in os.listdir(cache_dir):
+            db_path = os.path.join(cache_dir, db_folder, "rp.db")
+            if os.path.isfile(db_path):
+                _scan_db(db_path, all_trans)
+
+    # Fallback: bundled JSON
+    if not all_trans:
+        from core.library_fallback import load_fallback
+        for item in load_fallback("transitions"):
+            rid = item.get("resource_id", "")
+            if rid and rid not in all_trans:
+                all_trans[rid] = TransitionInfo(
+                    name=item.get("name", ""),
+                    resource_id=rid,
+                    category=item.get("category", ""),
+                    category_id=item.get("category_id", ""),
+                )
 
     result = list(all_trans.values())
     result.sort(key=lambda t: t.name)

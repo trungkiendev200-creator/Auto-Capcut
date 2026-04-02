@@ -1,48 +1,53 @@
-"""Theme constants — bảng màu và font dùng chung."""
+"""Theme constants — modern clean design."""
 
 COLORS = {
     # Base
-    "bg": "#f5f5f7",
+    "bg": "#f8fafc",
     "card": "#ffffff",
-    "border": "#e2e4e9",
+    "border": "#e2e8f0",
 
-    # Primary - soft indigo
-    "primary": "#6366f1",
-    "primary_hover": "#4f46e5",
-    "primary_light": "#eef2ff",
-    "primary_muted": "#c7d2fe",
+    # Primary - deep blue
+    "primary": "#3b82f6",
+    "primary_hover": "#2563eb",
+    "primary_light": "#eff6ff",
+    "primary_muted": "#bfdbfe",
 
     # Text
-    "text": "#374151",
-    "text_light": "#6b7280",
+    "text": "#1e293b",
+    "text_light": "#64748b",
     "text_white": "#ffffff",
 
     # Rows
     "row_a": "#ffffff",
-    "row_b": "#f9fafb",
+    "row_b": "#f8fafc",
 
     # Tab
-    "tab_bg": "#f0f0f5",
-    "tab_hover": "#e0e7ff",
+    "tab_bg": "#f1f5f9",
+    "tab_hover": "#dbeafe",
 
     # Status
-    "green": "#10b981",
-    "green_light": "#d1fae5",
+    "green": "#22c55e",
+    "green_light": "#dcfce7",
     "red": "#ef4444",
-    "red_light": "#fee2e2",
+    "red_light": "#fef2f2",
 
     # Input
-    "input_bg": "#f9fafb",
-    "input_border": "#d1d5db",
+    "input_bg": "#f8fafc",
+    "input_border": "#cbd5e1",
+
+    # Accent
+    "accent": "#8b5cf6",
+    "accent_light": "#f5f3ff",
 }
 
 FONT = {
-    "heading": ("Segoe UI", 16, "bold"),
-    "subheading": ("Segoe UI", 13, "bold"),
+    "heading": ("Segoe UI", 15, "bold"),
+    "subheading": ("Segoe UI", 12, "bold"),
     "body": ("Segoe UI", 12),
     "body_bold": ("Segoe UI", 12, "bold"),
     "small": ("Segoe UI", 11),
     "small_bold": ("Segoe UI", 11, "bold"),
-    "button": ("Segoe UI", 14, "bold"),
+    "button": ("Segoe UI", 13, "bold"),
     "mono": ("Consolas", 11),
+    "tab": ("Segoe UI", 12),
 }

@@ -8,3 +8,7 @@ dist/
 settings.json
 *.bak
 .env
+assets/debug_*
+assets/capcut_*
+assets/buttons/
+test_*.py
