@@ -1,4 +1,4 @@
-"""Tab Create Project."""
+"""Tab Create Project — single + batch."""
 
 import os
 import threading
@@ -19,21 +19,33 @@ class CreateProjectTab:
         frame = ctk.CTkFrame(parent, fg_color="transparent")
         frame.pack(expand=True, fill="both", padx=16, pady=10)
 
-        # Project Name
-        r1 = ctk.CTkFrame(frame, fg_color="transparent")
-        r1.pack(fill="x", pady=(0, 6))
-        ctk.CTkLabel(r1, text="Project Name:", font=FONT["body"],
+        # Batch checkbox
+        self.batch_var = tk.BooleanVar(value=False)
+        ctk.CTkCheckBox(
+            frame, text="Tạo đồng loạt (Batch)", variable=self.batch_var,
+            font=FONT["body_bold"], text_color=C["text"],
+            checkbox_width=20, checkbox_height=20,
+            fg_color=C["primary"], hover_color=C["primary_hover"],
+            command=self._on_batch_toggle,
+        ).pack(anchor="w", pady=(0, 8))
+
+        # Project Name (ẩn khi batch)
+        self.name_row = ctk.CTkFrame(frame, fg_color="transparent")
+        self.name_row.pack(fill="x", pady=(0, 6))
+        ctk.CTkLabel(self.name_row, text="Project Name:", font=FONT["body"],
                       text_color=C["text"], width=130, anchor="w").pack(side="left")
         self.name_var = tk.StringVar(value="Auto")
-        ctk.CTkEntry(r1, textvariable=self.name_var, height=32,
+        self.name_entry = ctk.CTkEntry(self.name_row, textvariable=self.name_var, height=32,
                       fg_color=C["input_bg"], border_color=C["input_border"],
-                      text_color=C["text"], corner_radius=8).pack(side="left", fill="x", expand=True)
+                      text_color=C["text"], corner_radius=8)
+        self.name_entry.pack(side="left", fill="x", expand=True)
 
         # Images/Videos Folder
         r2 = ctk.CTkFrame(frame, fg_color="transparent")
         r2.pack(fill="x", pady=(0, 6))
-        ctk.CTkLabel(r2, text="Images/Videos:", font=FONT["body"],
-                      text_color=C["text"], width=130, anchor="w").pack(side="left")
+        self.media_label = ctk.CTkLabel(r2, text="Images/Videos:", font=FONT["body"],
+                      text_color=C["text"], width=130, anchor="w")
+        self.media_label.pack(side="left")
         self.media_var = tk.StringVar()
         ctk.CTkEntry(r2, textvariable=self.media_var, height=32,
                       fg_color=C["input_bg"], border_color=C["input_border"],
@@ -46,8 +58,9 @@ class CreateProjectTab:
         # Audio Folder
         r3 = ctk.CTkFrame(frame, fg_color="transparent")
         r3.pack(fill="x", pady=(0, 6))
-        ctk.CTkLabel(r3, text="Audio (Optional):", font=FONT["body"],
-                      text_color=C["text"], width=130, anchor="w").pack(side="left")
+        self.audio_label = ctk.CTkLabel(r3, text="Audio (Optional):", font=FONT["body"],
+                      text_color=C["text"], width=130, anchor="w")
+        self.audio_label.pack(side="left")
         self.audio_var = tk.StringVar()
         ctk.CTkEntry(r3, textvariable=self.audio_var, height=32,
                       fg_color=C["input_bg"], border_color=C["input_border"],
@@ -112,87 +125,109 @@ class CreateProjectTab:
         )
         self.create_btn.pack(fill="x", pady=(4, 0))
 
+    # ── Batch toggle ──────────────────────────────────────────────
+    def _on_batch_toggle(self):
+        if self.batch_var.get():
+            self.name_row.pack_forget()
+            self.media_label.configure(text="Thư mục CHA ảnh:")
+            self.audio_label.configure(text="Thư mục CHA audio:")
+            self.create_btn.configure(text="Create All Projects")
+        else:
+            # Re-show name row (insert after batch checkbox)
+            self.name_row.pack(fill="x", pady=(0, 6), after=self.batch_var._variable)
+            # Workaround: just re-pack
+            self.name_row.pack_forget()
+            children = self.create_btn.master.winfo_children()
+            # Pack name_row as second child
+            for i, child in enumerate(children):
+                child.pack_forget()
+            for i, child in enumerate(children):
+                if i == 0:  # batch checkbox
+                    child.pack(anchor="w", pady=(0, 8))
+                elif child == self.name_row:
+                    child.pack(fill="x", pady=(0, 6))
+                elif child == self.create_btn:
+                    child.pack(fill="x", pady=(4, 0))
+                else:
+                    child.pack(fill="x", pady=(0, 6))
+
+            self.media_label.configure(text="Images/Videos:")
+            self.audio_label.configure(text="Audio (Optional):")
+            self.create_btn.configure(text="Create Project")
+
     def _browse_media(self):
-        path = filedialog.askdirectory(title="Select Images/Videos Folder")
+        path = filedialog.askdirectory(title="Select Folder")
         if path:
             self.media_var.set(path)
 
     def _browse_audio(self):
-        path = filedialog.askdirectory(title="Select Audio Folder (Optional)")
+        path = filedialog.askdirectory(title="Select Folder")
         if path:
             self.audio_var.set(path)
 
+    # ── Create ────────────────────────────────────────────────────
     def _on_create(self):
+        if self.batch_var.get():
+            self._on_batch_create()
+        else:
+            self._on_single_create()
+
+    def _on_single_create(self):
         name = self.name_var.get().strip()
         media = self.media_var.get().strip()
         audio = self.audio_var.get().strip()
         dur_text = self.duration_var.get().strip()
 
-        # Validate project name
         if not name:
             messagebox.showwarning("Lỗi", "Vui lòng nhập tên project.")
             return
-        # Tên không chứa ký tự đặc biệt
         invalid_chars = '<>:"/\\|?*'
         if any(c in name for c in invalid_chars):
             messagebox.showwarning("Lỗi", f"Tên project không được chứa ký tự: {invalid_chars}")
             return
-
-        # Validate media folder
         if not media:
             messagebox.showwarning("Lỗi", "Vui lòng chọn folder chứa ảnh/video.")
             return
         if not os.path.isdir(media):
             messagebox.showwarning("Lỗi", f"Folder không tồn tại:\n{media}")
             return
-        # Check có file media không
         media_exts = {".jpg", ".jpeg", ".png", ".bmp", ".webp", ".mp4", ".mov", ".avi", ".mkv"}
         has_media = any(os.path.splitext(f)[1].lower() in media_exts for f in os.listdir(media))
         if not has_media:
-            messagebox.showwarning("Lỗi", "Folder không chứa file ảnh/video nào.\n(jpg, png, mp4, mov...)")
+            messagebox.showwarning("Lỗi", "Folder không chứa file ảnh/video nào.")
             return
-
-        # Validate audio folder (optional)
         if audio and not os.path.isdir(audio):
             messagebox.showwarning("Lỗi", f"Folder audio không tồn tại:\n{audio}")
             return
-
-        # Validate duration
         try:
             dur = float(dur_text) if dur_text else 4.0
             if dur <= 0:
                 messagebox.showwarning("Lỗi", "Duration phải lớn hơn 0.")
                 return
         except ValueError:
-            messagebox.showwarning("Lỗi", f"Duration không hợp lệ: '{dur_text}'\nVui lòng nhập số (VD: 4)")
+            messagebox.showwarning("Lỗi", f"Duration không hợp lệ: '{dur_text}'")
             return
 
         config = cp.CreateConfig(
-            project_name=name,
-            media_folder=media,
-            audio_folder=audio,
-            image_duration=dur,
-            ratio=self.ratio_var.get(),
-            quality=self.quality_var.get(),
-            fps=int(self.fps_var.get()),
+            project_name=name, media_folder=media, audio_folder=audio,
+            image_duration=dur, ratio=self.ratio_var.get(),
+            quality=self.quality_var.get(), fps=int(self.fps_var.get()),
         )
-
         self.create_btn.configure(state="disabled", text="Creating...")
         self.app.log(f"Creating project: {name}")
-        threading.Thread(target=self._run_create, args=(config,), daemon=True).start()
+        threading.Thread(target=self._run_single, args=(config,), daemon=True).start()
 
-    def _run_create(self, config):
+    def _run_single(self, config):
         try:
             result = cp.create_project(config, self.app.capcut_path.get())
         except Exception as e:
             import traceback
             result = cp.CreateResult(False, str(e))
-            self.app.log(f"Create error: {traceback.format_exc()}")
+            self.app.log(f"Error: {traceback.format_exc()}")
 
         if result.success:
-            self.app.log(f"SUCCESS: {result.message}")
+            self.app.log(f"OK: {result.message}")
             self.app.root.after(0, lambda: self.app.status_var.set(f"  {result.message}"))
-            # Refresh project list
             self.app.root.after(0, self.app._load_projects)
         else:
             self.app.log(f"FAIL: {result.message}")
@@ -200,3 +235,71 @@ class CreateProjectTab:
 
         self.app.root.after(0, lambda: self.create_btn.configure(
             state="normal", text="Create Project"))
+
+    # ── Batch Create ──────────────────────────────────────────────
+    def _on_batch_create(self):
+        media = self.media_var.get().strip()
+        audio = self.audio_var.get().strip()
+
+        if not media:
+            messagebox.showwarning("Lỗi", "Vui lòng chọn thư mục CHA chứa ảnh/video.")
+            return
+        if not os.path.isdir(media):
+            messagebox.showwarning("Lỗi", f"Thư mục không tồn tại:\n{media}")
+            return
+        if not audio:
+            messagebox.showwarning("Lỗi", "Vui lòng chọn thư mục CHA chứa audio.\n(Batch yêu cầu cả ảnh và audio)")
+            return
+        if not os.path.isdir(audio):
+            messagebox.showwarning("Lỗi", f"Thư mục audio không tồn tại:\n{audio}")
+            return
+
+        # Check có thư mục con không
+        media_subs = [d for d in os.listdir(media) if os.path.isdir(os.path.join(media, d))]
+        if not media_subs:
+            messagebox.showwarning("Lỗi", "Thư mục CHA ảnh không có thư mục con nào.")
+            return
+
+        try:
+            dur = float(self.duration_var.get() or 4)
+            if dur <= 0:
+                dur = 4.0
+        except ValueError:
+            dur = 4.0
+
+        self.create_btn.configure(state="disabled", text="Creating batch...")
+        self.app.log(f"=== BATCH CREATE ===")
+        self.app.log(f"Media parent: {media}")
+        self.app.log(f"Audio parent: {audio}")
+
+        threading.Thread(target=self._run_batch, args=(media, audio, dur), daemon=True).start()
+
+    def _run_batch(self, media_parent, audio_parent, dur):
+        def cb(msg):
+            self.app.log(f"  {msg}")
+
+        try:
+            result = cp.batch_create_projects(
+                media_parent=media_parent,
+                audio_parent=audio_parent,
+                capcut_path=self.app.capcut_path.get(),
+                image_duration=dur,
+                ratio=self.ratio_var.get(),
+                quality=self.quality_var.get(),
+                fps=int(self.fps_var.get()),
+                callback=cb,
+            )
+        except Exception as e:
+            import traceback
+            self.app.log(f"Batch error: {traceback.format_exc()}")
+            result = cp.BatchResult()
+
+        summary = f"Batch: {result.created}/{result.total} created"
+        if result.skipped:
+            summary += f", {len(result.skipped)} skipped"
+
+        self.app.log(f"=== {summary} ===")
+        self.app.root.after(0, lambda: self.app.status_var.set(f"  {summary}"))
+        self.app.root.after(0, self.app._load_projects)
+        self.app.root.after(0, lambda: self.create_btn.configure(
+            state="normal", text="Create All Projects"))

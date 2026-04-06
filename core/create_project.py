@@ -81,19 +81,43 @@ def _get_media_info(filepath: str) -> dict:
             w, h = 1920, 1080
         return {"type": "photo", "width": w, "height": h, "duration": 10800000000, "name": name, "has_audio": False}
     else:
-        # Video: use default duration, CapCut will re-read actual duration
-        return {"type": "video", "width": 1920, "height": 1080, "duration": 10000000, "name": name, "has_audio": True}
+        # Video: đọc duration thật
+        vid_dur = 10000000  # fallback 10s
+        try:
+            from mutagen import File
+            f = File(filepath)
+            if f and f.info:
+                vid_dur = int(f.info.length * 1_000_000)
+        except Exception:
+            pass
+        return {"type": "video", "width": 1920, "height": 1080, "duration": vid_dur, "name": name, "has_audio": True}
 
 
 def _get_audio_duration(filepath: str) -> int:
-    """Ước tính duration audio (microseconds). CapCut sẽ tự đọc lại."""
-    # Rough estimate from file size: ~128kbps mp3
+    """Đọc duration audio chính xác (microseconds)."""
+    # Method 1: mutagen (chính xác)
+    try:
+        from mutagen.mp3 import MP3
+        audio = MP3(filepath)
+        return int(audio.info.length * 1_000_000)
+    except Exception:
+        pass
+
+    # Method 2: mutagen generic
+    try:
+        from mutagen import File
+        audio = File(filepath)
+        if audio and audio.info:
+            return int(audio.info.length * 1_000_000)
+    except Exception:
+        pass
+
+    # Method 3: fallback estimate từ file size (~96kbps)
     try:
         size = os.path.getsize(filepath)
-        duration_sec = size / (128 * 1024 / 8)  # 128kbps
-        return int(duration_sec * 1_000_000)
+        return int((size / (96 * 1024 / 8)) * 1_000_000)
     except Exception:
-        return 5000000  # fallback 5s
+        return 5000000
 
 
 def _make_video_material(filepath: str, info: dict) -> dict:
@@ -535,3 +559,96 @@ def create_project(config: CreateConfig, capcut_path: str) -> CreateResult:
 
     msg = f"Created '{config.project_name}': {len(media_files)} media, {len(audio_files)} audio"
     return CreateResult(True, msg, project_folder)
+
+
+@dataclass
+class BatchResult:
+    total: int = 0
+    created: int = 0
+    skipped: list[str] = None
+
+    def __post_init__(self):
+        if self.skipped is None:
+            self.skipped = []
+
+
+def batch_create_projects(
+    media_parent: str,
+    audio_parent: str,
+    capcut_path: str,
+    image_duration: float = 4.0,
+    ratio: str = "16:9",
+    quality: str = "1080p",
+    fps: int = 30,
+    callback=None,
+) -> BatchResult:
+    """Tạo đồng loạt projects từ thư mục cha.
+
+    Chỉ tạo khi thư mục con ảnh VÀ audio cùng tên đều tồn tại.
+    """
+    result = BatchResult()
+
+    if not os.path.isdir(media_parent):
+        if callback: callback(f"Media parent not found: {media_parent}")
+        return result
+    if not os.path.isdir(audio_parent):
+        if callback: callback(f"Audio parent not found: {audio_parent}")
+        return result
+
+    # Scan thư mục con
+    media_subs = {d for d in os.listdir(media_parent)
+                  if os.path.isdir(os.path.join(media_parent, d))}
+    audio_subs = {d for d in os.listdir(audio_parent)
+                  if os.path.isdir(os.path.join(audio_parent, d))}
+
+    # Chỉ lấy thư mục có CẢ 2
+    matched = sorted(media_subs & audio_subs)
+    skipped_media = sorted(media_subs - audio_subs)
+    skipped_audio = sorted(audio_subs - media_subs)
+
+    result.total = len(media_subs)
+
+    # Log skipped
+    for name in skipped_media:
+        msg = f"SKIP '{name}': có ảnh nhưng KHÔNG có audio"
+        result.skipped.append(msg)
+        if callback: callback(msg)
+
+    for name in skipped_audio:
+        msg = f"SKIP '{name}': có audio nhưng KHÔNG có ảnh"
+        result.skipped.append(msg)
+        if callback: callback(msg)
+
+    if not matched:
+        if callback: callback("Không tìm thấy cặp thư mục ảnh+audio nào trùng tên!")
+        return result
+
+    if callback: callback(f"Found {len(matched)} matched pairs: {matched[:5]}{'...' if len(matched)>5 else ''}")
+
+    # Tạo từng project
+    for name in matched:
+        media_folder = os.path.join(media_parent, name)
+        audio_folder = os.path.join(audio_parent, name)
+
+        config = CreateConfig(
+            project_name=name,
+            media_folder=media_folder,
+            audio_folder=audio_folder,
+            image_duration=image_duration,
+            ratio=ratio,
+            quality=quality,
+            fps=fps,
+        )
+
+        if callback: callback(f"Creating '{name}'...")
+
+        r = create_project(config, capcut_path)
+        if r.success:
+            result.created += 1
+            if callback: callback(f"  OK: {r.message}")
+        else:
+            result.skipped.append(f"FAIL '{name}': {r.message}")
+            if callback: callback(f"  FAIL: {r.message}")
+
+    if callback: callback(f"Batch done: {result.created}/{len(matched)} created, {len(result.skipped)} skipped")
+    return result

@@ -195,6 +195,20 @@ class AutoCapcut:
         )
         self.render_btn.pack(side="right")
 
+        # Calibrate row
+        cal_row = ctk.CTkFrame(render_box, fg_color="transparent")
+        cal_row.pack(fill="x", padx=8, pady=(0, 6))
+        ctk.CTkButton(
+            cal_row, text="Calibrate", height=26, corner_radius=6,
+            fg_color=C["primary_light"], hover_color=C["primary_muted"],
+            text_color=C["primary"], font=("Segoe UI", 10),
+            command=self._on_calibrate
+        ).pack(side="left")
+        self.cal_status = ctk.CTkLabel(
+            cal_row, text="", font=("Segoe UI", 10), text_color=C["text_light"]
+        )
+        self.cal_status.pack(side="left", padx=(6, 0))
+
     # ── STATUS BAR ────────────────────────────────────────────────────
     def _build_status_bar(self):
         bar = ctk.CTkFrame(self.root, fg_color=C["card"], height=26, corner_radius=0,
@@ -216,6 +230,33 @@ class AutoCapcut:
             self.log_box.see("end")
             self.log_box.configure(state="disabled")
         self.root.after(0, _write)
+
+    # ── CALIBRATE ─────────────────────────────────────────────────────
+    def _on_calibrate(self):
+        """Chụp template từ CapCut đang mở ở editor."""
+        from core import auto_render
+        confirm = messagebox.askokcancel(
+            "Calibrate",
+            "Mở CapCut → vào editor 1 project bất kỳ → bấm Export để mở dialog.\n\n"
+            "Giữ nguyên dialog Export → bấm OK."
+        )
+        if not confirm:
+            return
+
+        self.root.iconify()
+        time.sleep(1)
+
+        def run():
+            ok = auto_render.capture_templates(callback=self.log)
+            self.root.after(0, self.root.deiconify)
+            if ok:
+                self.root.after(0, lambda: self.cal_status.configure(
+                    text="Ready!", text_color=C["green"]))
+            else:
+                self.root.after(0, lambda: self.cal_status.configure(
+                    text="Failed", text_color=C["red"]))
+
+        threading.Thread(target=run, daemon=True).start()
 
     # ── ACTIONS ───────────────────────────────────────────────────────
     def _load_projects(self):
@@ -297,7 +338,7 @@ class AutoCapcut:
                 self.root.after(0, self.project_list.set_status, _idx, "...", C["primary"])
             self.root.after(0, self.project_list.set_status, idx, "Render", C["primary"])
             try:
-                ok, msg = auto_render.render_project(draft, config, callback=cb)
+                ok, msg = auto_render.render_project(draft, config, tool_window=self.root, callback=cb)
             except Exception as e:
                 ok, msg = False, str(e)
                 import traceback
