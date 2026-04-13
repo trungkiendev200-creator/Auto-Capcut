@@ -8,6 +8,7 @@ import threading
 from ui.theme import COLORS as C, FONT
 from ui.widgets import ProjectListFrame
 from ui.tabs.sync_tab import SyncTab
+from ui.tabs.sync_sub_tab import SyncSubTab
 from ui.tabs.keyframe_tab import KeyFrameTab
 from ui.tabs.animation_tab import AnimationTab
 from ui.tabs.transition_tab import TransitionTab
@@ -71,6 +72,7 @@ class AutoCapcut:
 
         self.create_tab = CreateProjectTab(tabview.add("Create Project"), app=self)
         self.sync_tab = SyncTab(tabview.add("Sync Audio"), app=self)
+        self.sync_sub_tab = SyncSubTab(tabview.add("VIP5AE"), app=self)
         self.keyframe_tab = KeyFrameTab(tabview.add("Key Frame"), app=self)
         self.animation_tab = AnimationTab(tabview.add("Animation"), app=self)
         self.transition_tab = TransitionTab(tabview.add("Transitions"), app=self)
@@ -191,7 +193,7 @@ class AutoCapcut:
             render_inner, text="Auto Render", height=30, corner_radius=6,
             fg_color=C["green"], hover_color="#16a34a",
             text_color=C["text_white"], font=FONT["small_bold"],
-            command=self._on_auto_render
+            command=self._on_auto_render_wip
         )
         self.render_btn.pack(side="right")
 
@@ -264,6 +266,9 @@ class AutoCapcut:
             drafts = capcut.load_projects(self.capcut_path.get())
             self.project_list.load(drafts)
             self.status_var.set(f"  {len(drafts)} projects loaded")
+            # Clear input data trong SYNC SUB tab
+            if hasattr(self, 'sync_sub_tab'):
+                self.sync_sub_tab.clear_inputs()
         except FileNotFoundError:
             self.status_var.set("  Meta file not found")
         except Exception as e:
@@ -293,6 +298,9 @@ class AutoCapcut:
         self.export_path.set(s["export_path"])
 
     # ── AUTO RENDER ───────────────────────────────────────────────────
+    def _on_auto_render_wip(self):
+        messagebox.showinfo("Auto Render", "Chức năng đang hoàn thiện.")
+
     def _on_auto_render(self):
         selected = self.project_list.get_selected()
         if not selected:

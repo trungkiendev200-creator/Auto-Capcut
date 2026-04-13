@@ -35,7 +35,17 @@ def load_projects(capcut_path: str) -> list[dict]:
 
 
 def load_draft_content(draft_path: str) -> dict:
-    """Load draft_content.json từ folder của 1 project."""
+    """Load draft_content.json — ưu tiên Timelines nếu có (CapCut mới)."""
+    # Thử Timelines trước (CapCut mới dùng folder này)
+    timelines_dir = os.path.join(draft_path, "Timelines")
+    if os.path.isdir(timelines_dir):
+        for d in os.listdir(timelines_dir):
+            tl_json = os.path.join(timelines_dir, d, "draft_content.json")
+            if os.path.isfile(tl_json):
+                with open(tl_json, "r", encoding="utf-8") as f:
+                    return json.load(f)
+
+    # Fallback: root draft_content.json
     json_path = os.path.join(draft_path, "draft_content.json")
     if not os.path.isfile(json_path):
         raise FileNotFoundError(f"draft_content.json not found in {draft_path}")
@@ -45,10 +55,70 @@ def load_draft_content(draft_path: str) -> dict:
 
 
 def save_draft_content(draft_path: str, data: dict) -> None:
-    """Ghi draft_content.json."""
-    json_path = os.path.join(draft_path, "draft_content.json")
-    with open(json_path, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False)
+    """Ghi draft_content.json vào root + Timelines. Kill CapCut nếu đang chạy."""
+    import subprocess
+    import time as _time
+
+    # Kill tất cả CapCut processes trước khi ghi
+    for proc_name in ["CapCut.exe", "CapCutLoader.exe", "CapCut_Service.exe"]:
+        try:
+            subprocess.run(
+                ["taskkill", "/F", "/IM", proc_name],
+                capture_output=True, timeout=5
+            )
+        except Exception:
+            pass
+
+    _time.sleep(1)
+
+    # Auto fix: tắt âm thanh video nằm trên vùng audio narration
+    audio_ranges = []
+    for t in data.get("tracks", []):
+        if t.get("type") == "audio":
+            for seg in t.get("segments", []):
+                a_start = seg["target_timerange"]["start"]
+                a_end = a_start + seg["target_timerange"]["duration"]
+                audio_ranges.append((a_start, a_end))
+
+    if audio_ranges:
+        for t in data.get("tracks", []):
+            if t.get("type") == "video":
+                for seg in t.get("segments", []):
+                    v_start = seg["target_timerange"]["start"]
+                    v_end = v_start + seg["target_timerange"]["duration"]
+                    # Video overlap với bất kỳ audio nào → tắt âm
+                    for a_start, a_end in audio_ranges:
+                        if v_start < a_end and v_end > a_start:
+                            seg["volume"] = 0.0
+                            break
+
+    content = json.dumps(data, ensure_ascii=False)
+
+    # Collect tất cả paths cần ghi
+    paths_to_write = []
+
+    # Root draft_content.json + .bk
+    root_json = os.path.join(draft_path, "draft_content.json")
+    paths_to_write.append(root_json)
+    if os.path.isfile(root_json + ".bk"):
+        paths_to_write.append(root_json + ".bk")
+
+    # Timelines/<UUID>/draft_content.json (CapCut mới dùng folder này)
+    timelines_dir = os.path.join(draft_path, "Timelines")
+    if os.path.isdir(timelines_dir):
+        for d in os.listdir(timelines_dir):
+            sub = os.path.join(timelines_dir, d)
+            if os.path.isdir(sub):
+                tl_json = os.path.join(sub, "draft_content.json")
+                if os.path.isfile(tl_json):
+                    paths_to_write.append(tl_json)
+
+    # Ghi tất cả
+    for path in paths_to_write:
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(content)
+            f.flush()
+            os.fsync(f.fileno())
 
 
 def find_video_tracks(data: dict) -> list[dict]:

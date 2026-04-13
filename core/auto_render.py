@@ -1,7 +1,8 @@
-"""Auto Render v6 — theo cách tool đối thủ.
+"""Auto Render v8 — Win32 + Screenshot detection + Keyboard shortcuts.
 
-CopyFromScreen (mss) + Template Matching (cv2) + Win32 mouse_event (ctypes).
-Ảnh mẫu cần calibrate 1 lần từ CapCut thật.
+- Win32 API: window management, keyboard, mouse
+- mss + cv2: detect project thumbnail chính xác (không hard-code tọa độ)
+- Keyboard shortcuts: Export (Ctrl+E), Confirm (Enter)
 """
 
 import os
@@ -10,18 +11,31 @@ import json
 import subprocess
 from dataclasses import dataclass
 import ctypes
+import ctypes.wintypes
 
 import cv2
 import numpy as np
 import mss
 
-ASSETS_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "assets")
-TEMPLATE_DIR = os.path.join(ASSETS_DIR, "templates")
-DEBUG_DIR = os.path.join(ASSETS_DIR, "debug_render")
+# ═══════════════════════════════════════════════════════════════
+#  Win32 Constants & API
+# ═══════════════════════════════════════════════════════════════
+user32 = ctypes.windll.user32
+kernel32 = ctypes.windll.kernel32
 
-# Win32 mouse constants
-MOUSEEVENTF_LEFTDOWN = 0x0002
-MOUSEEVENTF_LEFTUP = 0x0004
+SW_MINIMIZE = 6
+SW_MAXIMIZE = 3
+SW_RESTORE = 9
+GW_OWNER = 4
+
+KEYEVENTF_KEYUP = 0x0002
+VK_ESCAPE = 0x1B
+VK_RETURN = 0x0D
+VK_CONTROL = 0x11
+VK_E = 0x45
+
+ASSETS_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "assets")
+DEBUG_DIR = os.path.join(ASSETS_DIR, "debug_render")
 
 
 @dataclass
@@ -31,132 +45,142 @@ class RenderConfig:
 
 
 # ═══════════════════════════════════════════════════════════════
-#  Core: Screenshot + Find + Click (giống đối thủ)
+#  Debug
 # ═══════════════════════════════════════════════════════════════
-def capture_screen() -> np.ndarray:
-    """CopyFromScreen equivalent — chụp đúng cái gì trên monitor."""
-    with mss.mss() as sct:
-        return cv2.cvtColor(np.array(sct.grab(sct.monitors[1])), cv2.COLOR_BGRA2BGR)
-
-
-def find_template(screen, template_path, threshold=0.8):
-    """Tìm ảnh mẫu trên screenshot. Returns (cx, cy) hoặc None."""
-    if not os.path.isfile(template_path):
-        return None
-    tpl = cv2.imread(template_path)
-    if tpl is None:
-        return None
-    result = cv2.matchTemplate(screen, tpl, cv2.TM_CCOEFF_NORMED)
-    _, max_val, _, max_loc = cv2.minMaxLoc(result)
-    if max_val >= threshold:
-        return (max_loc[0] + tpl.shape[1] // 2, max_loc[1] + tpl.shape[0] // 2)
-    return None
-
-
-def find_any_template(screen, template_paths, threshold=0.8):
-    """Thử nhiều ảnh mẫu, trả về cái đầu tiên match."""
-    for path in template_paths:
-        pos = find_template(screen, path, threshold)
-        if pos:
-            return pos
-    return None
-
-
-def click_at(x, y, cb=None):
-    """Click bằng Win32 API — SetCursorPos + mouse_event."""
-    if cb: cb(f"  Click ({x},{y})")
-    ctypes.windll.user32.SetCursorPos(x, y)
-    time.sleep(0.1)
-    ctypes.windll.user32.mouse_event(MOUSEEVENTF_LEFTDOWN, x, y, 0, 0)
-    ctypes.windll.user32.mouse_event(MOUSEEVENTF_LEFTUP, x, y, 0, 0)
-
-
-def double_click_at(x, y, cb=None):
-    if cb: cb(f"  DblClick ({x},{y})")
-    click_at(x, y)
-    time.sleep(0.1)
-    click_at(x, y)
-
-
-def wait_for_image(template_path, timeout=30, threshold=0.8, cb=None):
-    """Chờ đến khi thấy ảnh mẫu trên screen."""
-    start = time.time()
-    while time.time() - start < timeout:
-        screen = capture_screen()
-        pos = find_template(screen, template_path, threshold)
-        if pos:
-            if cb: cb(f"  Found {os.path.basename(template_path)} at ({pos[0]},{pos[1]})")
-            return pos
-        time.sleep(0.5)
-    return None
-
-
-def save_debug(img, name):
+def _save_debug(img, name):
     os.makedirs(DEBUG_DIR, exist_ok=True)
     cv2.imwrite(os.path.join(DEBUG_DIR, name), img)
 
 
 # ═══════════════════════════════════════════════════════════════
-#  Calibrate: chụp ảnh mẫu nút Export từ CapCut
+#  Screenshot
 # ═══════════════════════════════════════════════════════════════
-def capture_templates(cb=None) -> bool:
-    """User mở CapCut editor + mở Export dialog → tool tự crop templates."""
-    os.makedirs(TEMPLATE_DIR, exist_ok=True)
-    screen = capture_screen()
-    h, w = screen.shape[:2]
-    save_debug(screen, "calibrate.png")
-    if cb: cb(f"  Screen: {w}x{h}")
+def _capture_window(hwnd):
+    """Chụp screenshot vùng CapCut window."""
+    rect = ctypes.wintypes.RECT()
+    user32.GetWindowRect(hwnd, ctypes.byref(rect))
+    region = {
+        "left": rect.left,
+        "top": rect.top,
+        "width": rect.right - rect.left,
+        "height": rect.bottom - rect.top,
+    }
+    with mss.mss() as sct:
+        img = np.array(sct.grab(region))
+    return cv2.cvtColor(img, cv2.COLOR_BGRA2BGR), rect
 
-    # Tìm teal buttons
-    hsv = cv2.cvtColor(screen, cv2.COLOR_BGR2HSV)
-    mask = cv2.inRange(hsv, np.array([75, 120, 150]), np.array([100, 255, 255]))
-    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
-    saved = 0
-    for c in contours:
-        x, y, bw, bh = cv2.boundingRect(c)
-        area = cv2.contourArea(c)
-        if area < 300 or bw < 40 or bw > 200:
-            continue
+# ═══════════════════════════════════════════════════════════════
+#  Win32 Helpers
+# ═══════════════════════════════════════════════════════════════
+def _press_key(vk):
+    user32.keybd_event(vk, 0, 0, 0)
+    time.sleep(0.05)
+    user32.keybd_event(vk, 0, KEYEVENTF_KEYUP, 0)
 
-        pad = 5
-        crop = screen[max(0,y-pad):y+bh+pad, max(0,x-pad):x+bw+pad]
 
-        if y < h * 0.05 and saved == 0:
-            cv2.imwrite(os.path.join(TEMPLATE_DIR, "export_btn.png"), crop)
-            if cb: cb(f"  Saved export_btn.png ({x},{y}) {bw}x{bh}")
-            saved += 1
-        elif y > h * 0.4 and y < h - 60 and saved <= 1:
-            cv2.imwrite(os.path.join(TEMPLATE_DIR, "dialog_export.png"), crop)
-            if cb: cb(f"  Saved dialog_export.png ({x},{y}) {bw}x{bh}")
-            saved += 1
+def _hotkey(modifier, vk):
+    user32.keybd_event(modifier, 0, 0, 0)
+    time.sleep(0.05)
+    user32.keybd_event(vk, 0, 0, 0)
+    time.sleep(0.05)
+    user32.keybd_event(vk, 0, KEYEVENTF_KEYUP, 0)
+    time.sleep(0.05)
+    user32.keybd_event(modifier, 0, KEYEVENTF_KEYUP, 0)
 
-    if saved == 0:
-        if cb: cb("  No teal buttons found! Open CapCut editor + Export dialog first.")
+
+def _find_capcut_hwnd():
+    result = []
+
+    def callback(hwnd, _):
+        if not user32.IsWindowVisible(hwnd):
+            return True
+        length = user32.GetWindowTextLengthW(hwnd)
+        if length == 0:
+            return True
+        buf = ctypes.create_unicode_buffer(length + 1)
+        user32.GetWindowTextW(hwnd, buf, length + 1)
+        title = buf.value
+        cls_buf = ctypes.create_unicode_buffer(256)
+        user32.GetClassNameW(hwnd, cls_buf, 256)
+        cls = cls_buf.value
+        if "Qt6" in cls and ("CapCut" in title or "cap cut" in title.lower()):
+            result.append(hwnd)
+        return True
+
+    WNDENUMPROC = ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.wintypes.HWND, ctypes.wintypes.LPARAM)
+    user32.EnumWindows(WNDENUMPROC(callback), 0)
+    return result[0] if result else None
+
+
+def _bring_to_front(hwnd):
+    if not hwnd:
         return False
-
-    if cb: cb(f"  Calibration done! ({saved} templates)")
+    if user32.IsIconic(hwnd):
+        user32.ShowWindow(hwnd, SW_RESTORE)
+        time.sleep(0.5)
+    user32.ShowWindow(hwnd, SW_MAXIMIZE)
+    time.sleep(0.3)
+    user32.SetForegroundWindow(hwnd)
+    time.sleep(0.3)
+    user32.BringWindowToTop(hwnd)
     return True
 
 
-def has_templates():
-    return os.path.isfile(os.path.join(TEMPLATE_DIR, "export_btn.png"))
+def _get_window_title(hwnd):
+    if not hwnd:
+        return ""
+    length = user32.GetWindowTextLengthW(hwnd)
+    if length == 0:
+        return ""
+    buf = ctypes.create_unicode_buffer(length + 1)
+    user32.GetWindowTextW(hwnd, buf, length + 1)
+    return buf.value
+
+
+def _minimize_window(hwnd):
+    if hwnd:
+        user32.ShowWindow(hwnd, SW_MINIMIZE)
+
+
+def _get_hwnd_from_tkinter(tk_window):
+    try:
+        return int(tk_window.wm_frame(), 16)
+    except Exception:
+        return None
+
+
+def _click_at(x, y):
+    user32.SetCursorPos(int(x), int(y))
+    time.sleep(0.1)
+    user32.mouse_event(0x0002, 0, 0, 0, 0)
+    time.sleep(0.05)
+    user32.mouse_event(0x0004, 0, 0, 0, 0)
+
+
+def _double_click_at(x, y):
+    _click_at(x, y)
+    time.sleep(0.08)
+    _click_at(x, y)
 
 
 # ═══════════════════════════════════════════════════════════════
-#  Helpers
+#  CapCut Helpers
 # ═══════════════════════════════════════════════════════════════
 def get_capcut_exe():
     base = os.path.join(os.environ.get("LOCALAPPDATA", ""), "CapCut", "Apps")
-    if not os.path.isdir(base): return ""
+    if not os.path.isdir(base):
+        return ""
     for d in sorted(os.listdir(base), reverse=True):
         exe = os.path.join(base, d, "CapCut.exe")
-        if os.path.isfile(exe): return exe
+        if os.path.isfile(exe):
+            return exe
     return ""
 
 
 def kill_capcut(cb=None):
-    if cb: cb("  Kill CapCut...")
+    if cb:
+        cb("Kill CapCut...")
     os.system('taskkill /F /IM CapCut.exe >nul 2>&1')
     os.system('taskkill /F /IM VEDetector.exe >nul 2>&1')
     os.system('taskkill /F /IM VEHelper.exe >nul 2>&1')
@@ -167,64 +191,236 @@ def promote_project(draft, cb=None):
     try:
         draft_root = draft.get("draft_root_path", "") or os.path.dirname(draft.get("draft_fold_path", ""))
         meta_path = os.path.join(draft_root, "root_meta_info.json")
-        if not os.path.isfile(meta_path): return False
+        if not os.path.isfile(meta_path):
+            return False
         with open(meta_path, "r", encoding="utf-8") as f:
             meta = json.load(f)
         target = draft.get("draft_name", "")
         max_t = max((d.get("tm_draft_modified", 0) for d in meta["all_draft_store"]), default=0)
         for d in meta["all_draft_store"]:
             if d.get("draft_name") == target:
-                d["tm_draft_modified"] = max_t + 1000000; break
+                d["tm_draft_modified"] = max_t + 1000000
+                break
         with open(meta_path, "w", encoding="utf-8") as f:
             json.dump(meta, f, ensure_ascii=False)
-        if cb: cb(f"  Promoted '{target}'")
+        if cb:
+            cb(f"Promoted '{target}'")
         return True
     except Exception as e:
-        if cb: cb(f"  Promote error: {e}"); return False
+        if cb:
+            cb(f"Promote error: {e}")
+        return False
 
 
-def _find_project_pos(screen, cb=None):
-    """Tìm project đầu tiên trên trang Home."""
+# ═══════════════════════════════════════════════════════════════
+#  Project Detection (cv2)
+# ═══════════════════════════════════════════════════════════════
+def _find_first_project_pos(hwnd, cb=None):
+    """Tìm vị trí project đầu tiên bằng column analysis.
+
+    Chiến lược:
+    1. Chụp screenshot, crop ROI vùng project (44-58% height)
+    2. Tính brightness trung bình mỗi cột dọc (vertical column mean)
+    3. Tìm các "valley" (cột tối = gap giữa thumbnails) và "peak" (cột sáng hơn = thumbnail)
+    4. Thumbnail đầu tiên = vùng giữa gap đầu (sidebar) và gap thứ 2
+    5. Click center của vùng đó
+    """
+    screen, win_rect = _capture_window(hwnd)
     h, w = screen.shape[:2]
+    _save_debug(screen, "01_home.png")
+
+    if cb:
+        cb(f"Screenshot: {w}x{h}")
+
     gray = cv2.cvtColor(screen, cv2.COLOR_BGR2GRAY)
-    for y in range(int(h * 0.25), int(h * 0.50), 2):
-        row = gray[y, int(w * 0.08):int(w * 0.20)]
-        if np.sum(row > 180) > 20:
-            cx = int(w * 0.12)
-            cy = y + int(h * 0.06)
-            if cb: cb(f"  Projects at y={y}, thumb at ({cx},{cy})")
-            return (cx, cy)
+
+    # === ROI: vùng thumbnails only (44-56% height) ===
+    # Chỉ lấy vùng chứa thumbnail bodies, bỏ "Projects" label và tên project
+    x1 = int(w * 0.08)
+    x2 = int(w * 0.85)
+    y1 = int(h * 0.44)
+    y2 = int(h * 0.56)
+    roi = gray[y1:y2, x1:x2]
+    roi_h, roi_w = roi.shape
+    _save_debug(roi, "02_roi.png")
+
+    if cb:
+        cb(f"ROI: x=[{x1},{x2}] y=[{y1},{y2}] ({roi_w}x{roi_h})")
+
+    # === Column analysis: brightness trung bình mỗi cột dọc ===
+    col_means = np.mean(roi, axis=0)  # shape: (roi_w,)
+
+    # Smooth để bớt noise
+    kernel_size = 11
+    col_smooth = np.convolve(col_means, np.ones(kernel_size)/kernel_size, mode='same')
+
+    # Background level = median (phần lớn là background tối)
+    bg_level = np.median(col_smooth)
+
+    if cb:
+        cb(f"Background level: {bg_level:.1f}")
+
+    # === Tìm các vùng "sáng hơn background" = thumbnails ===
+    # Thumbnail dù tối vẫn có content (DISCLAIMER text, preview, etc.)
+    # nên brightness hơi cao hơn background thuần
+    threshold = bg_level + 3  # chỉ cần hơn background 3 level
+
+    above = col_smooth > threshold
+    # Tìm các transitions (từ tối→sáng và sáng→tối)
+    diff = np.diff(above.astype(int))
+    rises = np.where(diff == 1)[0] + 1   # bắt đầu thumbnail
+    falls = np.where(diff == -1)[0] + 1  # kết thúc thumbnail
+
+    # Handle edge cases
+    if above[0]:
+        rises = np.insert(rises, 0, 0)
+    if above[-1]:
+        falls = np.append(falls, roi_w)
+
+    # Ghép thành segments
+    segments = list(zip(rises[:len(falls)], falls[:len(rises)]))
+
+    # Lọc: thumbnail phải rộng >= 40px
+    thumbnails = [(s, e) for s, e in segments if (e - s) >= 40]
+
+    if cb:
+        cb(f"Found {len(thumbnails)} thumbnail segments:")
+        for i, (s, e) in enumerate(thumbnails):
+            cx = x1 + (s + e) // 2
+            cb(f"  seg[{i}]: x=[{x1+s},{x1+e}] width={e-s} center_x={cx}")
+
+    # === Debug image ===
+    debug_img = screen.copy()
+    for s, e in thumbnails:
+        abs_s = x1 + s
+        abs_e = x1 + e
+        cv2.rectangle(debug_img, (abs_s, y1), (abs_e, y2), (0, 255, 0), 2)
+
+    if thumbnails:
+        # Thumbnail đầu tiên
+        s, e = thumbnails[0]
+        click_x = x1 + (s + e) // 2
+        click_y = (y1 + y2) // 2  # center Y of thumbnail row
+
+        cv2.circle(debug_img, (click_x, click_y), 12, (0, 0, 255), 3)
+        cv2.putText(debug_img, "CLICK", (click_x + 15, click_y - 5),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+        _save_debug(debug_img, "04_detected.png")
+
+        screen_x = win_rect.left + click_x
+        screen_y = win_rect.top + click_y
+
+        if cb:
+            cb(f"First thumbnail: x=[{x1+s},{x1+e}] center=({click_x},{click_y})")
+            cb(f"Click at screen ({screen_x},{screen_y})")
+
+        return screen_x, screen_y
+
+    _save_debug(debug_img, "04_detected.png")
+
+    if cb:
+        cb("No thumbnails detected! Check debug images.")
     return None
 
 
-def _find_teal_top(screen):
-    """Tìm nút teal ở top 5% (Export button trên toolbar)."""
-    h, w = screen.shape[:2]
-    hsv = cv2.cvtColor(screen, cv2.COLOR_BGR2HSV)
-    mask = cv2.inRange(hsv, np.array([75, 120, 150]), np.array([100, 255, 255]))
-    # Chỉ search top 5%
-    mask[int(h*0.05):, :] = 0
-    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    for c in contours:
-        x, y, bw, bh = cv2.boundingRect(c)
-        if cv2.contourArea(c) > 300 and 40 < bw < 200:
-            return (x + bw // 2, y + bh // 2)
+# ═══════════════════════════════════════════════════════════════
+#  Wait helpers
+# ═══════════════════════════════════════════════════════════════
+def _wait_capcut_window(timeout=60, cb=None):
+    start = time.time()
+    while time.time() - start < timeout:
+        hwnd = _find_capcut_hwnd()
+        if hwnd:
+            if cb:
+                cb(f"CapCut window found (hwnd={hwnd})")
+            return hwnd
+        elapsed = int(time.time() - start)
+        if cb and elapsed % 5 == 0 and elapsed > 0:
+            cb(f"Waiting CapCut window... {elapsed}s")
+        time.sleep(1)
     return None
 
 
-def _find_teal_dialog(screen):
-    """Tìm nút teal ở vùng dialog (40-90% height)."""
-    h, w = screen.shape[:2]
-    hsv = cv2.cvtColor(screen, cv2.COLOR_BGR2HSV)
-    mask = cv2.inRange(hsv, np.array([75, 120, 150]), np.array([100, 255, 255]))
-    mask[:int(h*0.4), :] = 0
-    mask[int(h*0.9):, :] = 0
-    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    for c in contours:
-        x, y, bw, bh = cv2.boundingRect(c)
-        if cv2.contourArea(c) > 300 and 40 < bw < 200:
-            return (x + bw // 2, y + bh // 2)
-    return None
+def _wait_capcut_home(hwnd, timeout=60, cb=None):
+    """Chờ CapCut Home load xong bằng screenshot: check dark pixel > 60%."""
+    start = time.time()
+    while time.time() - start < timeout:
+        if user32.IsWindowVisible(hwnd):
+            try:
+                screen, _ = _capture_window(hwnd)
+                gray = cv2.cvtColor(screen, cv2.COLOR_BGR2GRAY)
+                dark_pct = np.sum(gray < 50) / gray.size * 100
+                elapsed = int(time.time() - start)
+                if cb and elapsed % 3 == 0:
+                    cb(f"Loading... dark={dark_pct:.0f}% ({elapsed}s)")
+                if dark_pct > 60:
+                    if cb:
+                        cb(f"Home loaded! dark={dark_pct:.0f}%")
+                    _save_debug(screen, "00_home_loaded.png")
+                    time.sleep(5)
+                    return True
+            except Exception:
+                pass
+        time.sleep(2)
+    return False
+
+
+def _wait_editor_loaded(hwnd, project_name, timeout=60, cb=None):
+    """Chờ editor load: detect bằng screenshot thay đổi so với Home."""
+    start = time.time()
+    original_title = _get_window_title(hwnd)
+
+    # Chụp screenshot Home làm baseline
+    try:
+        home_screen, _ = _capture_window(hwnd)
+        home_gray = cv2.cvtColor(home_screen, cv2.COLOR_BGR2GRAY)
+    except Exception:
+        home_gray = None
+
+    if cb:
+        cb(f"Original title: '{original_title}'")
+
+    while time.time() - start < timeout:
+        time.sleep(2)
+        elapsed = int(time.time() - start)
+
+        # Check 1: title thay đổi
+        current_title = _get_window_title(hwnd)
+        if current_title and current_title != original_title:
+            if cb:
+                cb(f"Title changed: '{current_title}' ({elapsed}s)")
+            time.sleep(3)
+            return True
+
+        # Check 2: screenshot thay đổi đáng kể so với Home
+        if home_gray is not None and elapsed >= 5:
+            try:
+                current_screen, _ = _capture_window(hwnd)
+                current_gray = cv2.cvtColor(current_screen, cv2.COLOR_BGR2GRAY)
+                diff = cv2.absdiff(home_gray, current_gray)
+                change_pct = np.sum(diff > 30) / diff.size * 100
+                if cb:
+                    cb(f"Screen change: {change_pct:.1f}% ({elapsed}s)")
+                _save_debug(current_screen, f"05_editor_{elapsed}s.png")
+                if change_pct > 30:
+                    if cb:
+                        cb(f"Editor detected! change={change_pct:.1f}% ({elapsed}s)")
+                    time.sleep(3)
+                    return True
+            except Exception:
+                pass
+
+        # Check 3: timeout fallback
+        if elapsed >= 25:
+            if cb:
+                cb(f"Assuming editor loaded ({elapsed}s)")
+            time.sleep(3)
+            return True
+
+        if cb and elapsed % 5 == 0:
+            cb(f"Waiting editor... {elapsed}s")
+
+    return False
 
 
 def wait_render_complete(export_path, timeout=3600, cb=None):
@@ -234,174 +430,149 @@ def wait_render_complete(export_path, timeout=3600, cb=None):
         time.sleep(5)
         if os.path.isdir(export_path):
             new = set(os.listdir(export_path)) - existing
-            vids = [f for f in new if f.lower().endswith(('.mp4','.mov','.avi','.mkv')) and not f.endswith('.tmp')]
+            vids = [f for f in new if f.lower().endswith(('.mp4', '.mov', '.avi', '.mkv')) and not f.endswith('.tmp')]
             if vids:
                 fp = os.path.join(export_path, vids[0])
-                s1 = os.path.getsize(fp); time.sleep(3); s2 = os.path.getsize(fp)
+                s1 = os.path.getsize(fp)
+                time.sleep(3)
+                s2 = os.path.getsize(fp)
                 if s1 == s2 and s1 > 0:
-                    if cb: cb(f"  DONE! {vids[0]} ({s2//1024//1024}MB)")
+                    if cb:
+                        cb(f"DONE! {vids[0]} ({s2 // 1024 // 1024}MB)")
                     return True
         elapsed = int(time.time() - start)
-        if cb and elapsed % 15 == 0: cb(f"  Rendering... {elapsed}s")
+        if cb and elapsed % 15 == 0:
+            cb(f"Rendering... {elapsed}s")
     return False
 
 
 # ═══════════════════════════════════════════════════════════════
-#  Main Render (giống flow đối thủ)
+#  Main Render Flow
 # ═══════════════════════════════════════════════════════════════
 def render_project(draft, config, tool_window=None, callback=None):
     name = draft.get("draft_name", "")
-    if not name: return False, "No project name"
+    if not name:
+        return False, "No project name"
     cb = callback
 
     try:
-        # === 1. Kill + promote ===
-        if cb: cb("[1] Kill CapCut + promote")
+        # === 1. Kill CapCut + promote ===
+        if cb:
+            cb("[1] Kill CapCut + promote")
         kill_capcut(cb)
         promote_project(draft, cb)
 
-        # === 2. Minimize tool (thu nhỏ xuống taskbar) ===
+        # === 2. Minimize tool window ===
         if tool_window:
-            if cb: cb("[2] Minimizing tool to taskbar...")
-            tool_window.after(0, tool_window.iconify)
-            time.sleep(2)
+            if cb:
+                cb("[2] Minimize tool window")
+            tool_hwnd = _get_hwnd_from_tkinter(tool_window)
+            if tool_hwnd:
+                _minimize_window(tool_hwnd)
+            else:
+                tool_window.after(0, tool_window.iconify)
+            time.sleep(1)
 
         # === 3. Mở CapCut ===
         exe = get_capcut_exe()
-        if not exe: return False, "CapCut.exe not found"
-        if cb: cb("[3] Opening CapCut...")
+        if not exe:
+            return False, "CapCut.exe not found"
+        if cb:
+            cb("[3] Opening CapCut...")
         subprocess.Popen([exe])
 
-        # === 4. Đợi CapCut loaded (loop chụp mss → check dark >70%) ===
-        if cb: cb("[4] Waiting CapCut to load...")
-        loaded = False
-        for i in range(40):  # max 80s
-            time.sleep(2)
-            screen = capture_screen()
-            gray = cv2.cvtColor(screen, cv2.COLOR_BGR2GRAY)
-            dp = np.sum(gray < 40) / gray.size * 100
-            if i % 5 == 0:
-                save_debug(screen, f"03_wait_{i:02d}.png")
-                if cb: cb(f"  [{i*2}s] dark={dp:.0f}%")
-            if dp > 70:
-                loaded = True
-                save_debug(screen, "03_loaded.png")
-                if cb: cb(f"  Loaded! dark={dp:.0f}%")
-                time.sleep(5)  # extra wait cho UI render xong
-                break
-        if not loaded:
-            return False, "CapCut failed to load"
+        # === 4. Chờ CapCut window ===
+        if cb:
+            cb("[4] Waiting CapCut window...")
+        hwnd = _wait_capcut_window(timeout=60, cb=cb)
+        if not hwnd:
+            return False, "CapCut window not found"
 
-        # === 4. Close popups (Escape) ===
-        if cb: cb("[5] Close popups (Escape)")
-        import pyautogui
-        pyautogui.press('escape')
+        # === 5. Maximize + foreground ===
+        if cb:
+            cb("[5] Bring CapCut to front")
+        _bring_to_front(hwnd)
+
+        # === 6. Chờ Home load (screenshot dark check) ===
+        if cb:
+            cb("[6] Waiting Home to load...")
+        if not _wait_capcut_home(hwnd, timeout=60, cb=cb):
+            return False, "CapCut Home failed to load"
+
+        # === 7. Close popups ===
+        if cb:
+            cb("[7] Close popups (Escape)")
+        _bring_to_front(hwnd)
+        time.sleep(0.5)
+        _press_key(VK_ESCAPE)
         time.sleep(1)
-        pyautogui.press('escape')
+        _press_key(VK_ESCAPE)
         time.sleep(2)
 
-        # === 5. Chụp + tìm project ===
-        if cb: cb("[6] Finding project...")
-        screen = capture_screen()
-        save_debug(screen, "05_find_project.png")
-        pos = _find_project_pos(screen, cb)
+        # === 8. Tìm + click project đầu tiên ===
+        if cb:
+            cb(f"[8] Finding project: {name}")
+        _bring_to_front(hwnd)
+        time.sleep(1)
+        pos = _find_first_project_pos(hwnd, cb)
         if not pos:
             return False, "Cannot find project on screen"
+        if cb:
+            cb(f"[8] Double-click project at ({pos[0]},{pos[1]})")
+        _double_click_at(pos[0], pos[1])
 
-        # === 6. Click project ===
-        if cb: cb(f"[7] Double-click project")
-        double_click_at(pos[0], pos[1], cb)
+        # === 9. Chờ editor load (screenshot diff) ===
+        if cb:
+            cb("[9] Waiting editor to load...")
+        if not _wait_editor_loaded(hwnd, name, timeout=60, cb=cb):
+            return False, "Editor failed to load"
 
-        # === 7. Đợi editor (loop: chụp → tìm Export teal ở top) ===
-        if cb: cb("[8] Waiting editor (Export button)...")
-        export_pos = None
-        for i in range(30):  # max 60s
-            time.sleep(2)
-            screen = capture_screen()
-            if i % 5 == 0:
-                save_debug(screen, f"07_editor_{i:02d}.png")
-
-            # Method 1: template matching
-            if has_templates():
-                export_pos = find_template(screen, os.path.join(TEMPLATE_DIR, "export_btn.png"), 0.7)
-                if export_pos:
-                    if cb: cb(f"  Template match! ({export_pos[0]},{export_pos[1]})")
-                    break
-
-            # Method 2: color detection
-            export_pos = _find_teal_top(screen)
-            if export_pos:
-                if cb: cb(f"  Teal detected! ({export_pos[0]},{export_pos[1]})")
-                save_debug(screen, "07_editor_ready.png")
-                break
-
-            if cb and i % 3 == 0: cb(f"  [{i*2}s] waiting...")
-
-        if not export_pos:
-            save_debug(capture_screen(), "07_fail.png")
-            return False, "Export button not found"
-
-        # === 8. Click Export ===
-        if cb: cb(f"[9] Click Export")
-        click_at(export_pos[0], export_pos[1], cb)
+        # === 10. Export: Ctrl+E ===
+        if cb:
+            cb("[10] Export (Ctrl+E)")
+        _bring_to_front(hwnd)
+        time.sleep(1)
+        _hotkey(VK_CONTROL, VK_E)
         time.sleep(4)
 
-        # === 9. Tìm dialog Export ===
-        if cb: cb("[10] Finding dialog Export...")
-        screen = capture_screen()
-        save_debug(screen, "09_dialog.png")
-
-        dialog_pos = None
-        # Template first
-        if os.path.isfile(os.path.join(TEMPLATE_DIR, "dialog_export.png")):
-            dialog_pos = find_template(screen, os.path.join(TEMPLATE_DIR, "dialog_export.png"), 0.7)
-        # Color fallback
-        if not dialog_pos:
-            dialog_pos = _find_teal_dialog(screen)
-
-        if not dialog_pos:
-            # Retry
-            time.sleep(3)
-            screen = capture_screen()
-            save_debug(screen, "09_retry.png")
-            dialog_pos = _find_teal_dialog(screen)
-
-        if not dialog_pos:
-            if cb:
-                btns = []
-                hsv = cv2.cvtColor(screen, cv2.COLOR_BGR2HSV)
-                mask = cv2.inRange(hsv, np.array([75,120,150]), np.array([100,255,255]))
-                cnts, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-                for c in cnts:
-                    x,y,w,h = cv2.boundingRect(c)
-                    if cv2.contourArea(c) > 200:
-                        cb(f"  Teal: ({x},{y}) {w}x{h} area={cv2.contourArea(c):.0f}")
-            return False, "Dialog Export not found"
-
-        # === 10. Click dialog Export ===
-        if cb: cb(f"[11] Click dialog Export")
-        click_at(dialog_pos[0], dialog_pos[1], cb)
+        # === 11. Confirm: Enter ===
+        if cb:
+            cb("[11] Confirm export (Enter)")
+        _press_key(VK_RETURN)
         time.sleep(3)
 
-        # === 11. Wait render ===
-        if cb: cb("[12] Waiting render...")
+        # === 12. Chờ render ===
+        if cb:
+            cb("[12] Waiting render complete...")
         ok = wait_render_complete(config.export_path, timeout=3600, cb=cb)
-        if not ok: return False, "Render timeout"
+        if not ok:
+            return False, "Render timeout"
 
+        # === 13. Done ===
         time.sleep(2)
         kill_capcut(cb)
         return True, f"Rendered: {name}"
 
     except Exception as e:
         import traceback
-        if cb: cb(f"EXCEPTION: {traceback.format_exc()}")
+        if cb:
+            cb(f"EXCEPTION: {traceback.format_exc()}")
         kill_capcut()
         return False, f"Error: {e}"
 
     finally:
-        # Restore tool window
         if tool_window:
             tool_window.after(0, tool_window.deiconify)
+
+
+def has_templates():
+    return True
+
+
+def capture_templates(cb=None):
+    if cb:
+        cb("v8: Không cần calibrate — auto detect project position.")
+    return True
 
 
 def shutdown_pc():
