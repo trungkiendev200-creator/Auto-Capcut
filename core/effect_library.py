@@ -29,18 +29,18 @@ def scan_library(capcut_path: str | None = None) -> list[EffectInfo]:
             if os.path.isfile(db_path):
                 _scan_db(db_path, all_effects)
 
-    # Fallback: bundled JSON
-    if not all_effects:
-        from core.library_fallback import load_fallback
-        for item in load_fallback("effects"):
-            rid = item.get("resource_id", "")
-            if rid and rid not in all_effects:
-                all_effects[rid] = EffectInfo(
-                    name=item.get("name", ""),
-                    resource_id=rid,
-                    category=item.get("category", ""),
-                    category_id=item.get("category_id", ""),
-                )
+    # Merge bundled JSON làm baseline: cache CapCut đã thêm trước, fallback
+    # điền phần thiếu. Đảm bảo mọi máy đều thấy full library.
+    from core.library_fallback import load_fallback
+    for item in load_fallback("effects"):
+        rid = item.get("resource_id", "")
+        if rid and rid not in all_effects:
+            all_effects[rid] = EffectInfo(
+                name=item.get("name", ""),
+                resource_id=rid,
+                category=item.get("category", ""),
+                category_id=item.get("category_id", ""),
+            )
 
     result = list(all_effects.values())
     result.sort(key=lambda e: e.name)

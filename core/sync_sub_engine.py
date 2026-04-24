@@ -363,6 +363,7 @@ def cut_and_import_audio(
         bg_seg["source_timerange"]["start"] = 0
         bg_seg["source_timerange"]["duration"] = min(bg_info["duration"], insert_dur)
         bg_seg["volume"] = 0.0  # Tắt âm thanh video nền
+        bg_seg["last_nonzero_volume"] = 0.0
         video_tracks[0]["segments"].append(bg_seg)
 
         # Audio segments
@@ -941,6 +942,7 @@ def sync_media_sub(
             new_seg["source_timerange"]["duration"] = src_dur
             new_seg["speed"] = speed
             new_seg["volume"] = 0.0  # Tắt âm thanh video trên audio
+            new_seg["last_nonzero_volume"] = 0.0
 
             new_segments.append(new_seg)
             replaced += 1

@@ -38,19 +38,20 @@ def scan_library(capcut_path: str | None = None) -> list[AnimationInfo]:
             if os.path.isfile(db_path):
                 _scan_db(db_path, all_anims)
 
-    # Fallback: nếu cache trống, dùng bundled JSON
-    if not all_anims:
-        from core.library_fallback import load_fallback
-        for item in load_fallback("animations"):
-            rid = item.get("resource_id", "")
-            if rid and rid not in all_anims:
-                all_anims[rid] = AnimationInfo(
-                    name=item.get("name", ""),
-                    resource_id=rid,
-                    category=item.get("category", "In"),
-                    category_id=item.get("category_id", ""),
-                    default_duration=item.get("default_duration", 500000),
-                )
+    # Merge bundled JSON làm baseline: cache CapCut (nếu có) đã thêm trước,
+    # fallback chỉ điền thêm những rid còn thiếu. Đảm bảo mọi máy đều thấy
+    # full library dù cache CapCut rỗng/khác schema.
+    from core.library_fallback import load_fallback
+    for item in load_fallback("animations"):
+        rid = item.get("resource_id", "")
+        if rid and rid not in all_anims:
+            all_anims[rid] = AnimationInfo(
+                name=item.get("name", ""),
+                resource_id=rid,
+                category=item.get("category", "In"),
+                category_id=item.get("category_id", ""),
+                default_duration=item.get("default_duration", 500000),
+            )
 
     result = list(all_anims.values())
     # Sort: In first, then Out, then Combo, then by name

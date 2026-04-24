@@ -81,6 +81,7 @@ def save_draft_content(draft_path: str, data: dict) -> None:
                 audio_ranges.append((a_start, a_end))
 
     if audio_ranges:
+        muted_material_ids = set()
         for t in data.get("tracks", []):
             if t.get("type") == "video":
                 for seg in t.get("segments", []):
@@ -90,7 +91,14 @@ def save_draft_content(draft_path: str, data: dict) -> None:
                     for a_start, a_end in audio_ranges:
                         if v_start < a_end and v_end > a_start:
                             seg["volume"] = 0.0
+                            seg["last_nonzero_volume"] = 0.0
+                            muted_material_ids.add(seg.get("material_id", ""))
                             break
+
+        # Set has_audio=false trên material để CapCut không khôi phục âm thanh
+        for vid_mat in data.get("materials", {}).get("videos", []):
+            if vid_mat.get("id") in muted_material_ids and vid_mat.get("has_audio"):
+                vid_mat["has_audio"] = False
 
     content = json.dumps(data, ensure_ascii=False)
 

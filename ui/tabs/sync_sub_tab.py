@@ -24,6 +24,8 @@ class SyncSubTab:
         self.audio_folder_var = ctk.StringVar()
         self.bg_video_var = ctk.StringVar()
         self.pic_folder_var = ctk.StringVar()
+        self.promax_parent_var = ctk.StringVar()
+        self.promax_bg_var = ctk.StringVar()
         self._unlocked = False
         self._parent = parent
         self._build_lock_screen(parent)
@@ -101,6 +103,7 @@ class SyncSubTab:
         self._build_delete_tab(sub_tabs.add("Xóa SRT"))
         self._build_sync_tab(sub_tabs.add("Sync Media"))
         self._build_picture_law_tab(sub_tabs.add("Insert Picture"))
+        self._build_promax_tab(sub_tabs.add("PROMAX"))
 
         # ── Info bar ──
         self.info = ctk.CTkLabel(
@@ -301,7 +304,11 @@ class SyncSubTab:
         self.audio_folder_var.set("")
         self.bg_video_var.set("")
         self.pic_folder_var.set("")
+        self.promax_parent_var.set("")
+        self.promax_bg_var.set("")
         self.speed_var.set("1.3")
+        if hasattr(self, "promax_speed_var"):
+            self.promax_speed_var.set("1.3")
         self.cut_input.configure(state="normal")
         self.cut_input.delete("1.0", "end")
         self.delete_input.configure(state="normal")
@@ -710,3 +717,394 @@ class SyncSubTab:
 
         root.after(0, lambda: self.pic_btn.configure(
             state="normal", text="Insert Picture Law"))
+
+    # ── Build sub-tab: PROMAX ──────────────────────────────────────
+    def _build_promax_tab(self, parent):
+        import tkinter as tk
+
+        f = ctk.CTkFrame(parent, fg_color="transparent")
+        f.pack(fill="both", expand=True, padx=10, pady=6)
+
+        # Parent folder
+        r1 = ctk.CTkFrame(f, fg_color="transparent")
+        r1.pack(fill="x", pady=(0, 4))
+        ctk.CTkLabel(r1, text="Thư mục cha:", width=95, anchor="w",
+                     font=FONT["small"], text_color=C["text_light"]).pack(side="left")
+        ctk.CTkEntry(r1, textvariable=self.promax_parent_var, height=28,
+                     fg_color=C["input_bg"], border_color=C["input_border"],
+                     text_color=C["text"], corner_radius=6, font=FONT["small"]
+                     ).pack(side="left", fill="x", expand=True, padx=(4, 4))
+        ctk.CTkButton(r1, text="...", width=28, height=28, corner_radius=6,
+                      fg_color=C["tab_bg"], text_color=C["text"],
+                      hover_color=C["primary_muted"], border_width=1,
+                      border_color=C["input_border"], font=FONT["small"],
+                      command=lambda: self._browse_dir(self.promax_parent_var)
+                      ).pack(side="left")
+
+        # Background video
+        r2 = ctk.CTkFrame(f, fg_color="transparent")
+        r2.pack(fill="x", pady=(0, 4))
+        ctk.CTkLabel(r2, text="Video nền:", width=95, anchor="w",
+                     font=FONT["small"], text_color=C["text_light"]).pack(side="left")
+        ctk.CTkEntry(r2, textvariable=self.promax_bg_var, height=28,
+                     fg_color=C["input_bg"], border_color=C["input_border"],
+                     text_color=C["text"], corner_radius=6, font=FONT["small"]
+                     ).pack(side="left", fill="x", expand=True, padx=(4, 4))
+        ctk.CTkButton(r2, text="...", width=28, height=28, corner_radius=6,
+                      fg_color=C["tab_bg"], text_color=C["text"],
+                      hover_color=C["primary_muted"], border_width=1,
+                      border_color=C["input_border"], font=FONT["small"],
+                      command=self._browse_promax_bg
+                      ).pack(side="left")
+
+        # Speed
+        r3 = ctk.CTkFrame(f, fg_color="transparent")
+        r3.pack(fill="x", pady=(0, 4))
+        ctk.CTkLabel(r3, text="Sync Speed:", width=95, anchor="w",
+                     font=FONT["small"], text_color=C["text_light"]).pack(side="left")
+        self.promax_speed_var = ctk.StringVar(value="1.3")
+        ctk.CTkEntry(r3, textvariable=self.promax_speed_var, height=28, width=80,
+                     fg_color=C["input_bg"], border_color=C["input_border"],
+                     text_color=C["text"], corner_radius=6, font=FONT["small"]
+                     ).pack(side="left", padx=(4, 0))
+        self.promax_anim_var = tk.BooleanVar(value=True)
+        ctk.CTkCheckBox(
+            r3, text="Animation cho ảnh", variable=self.promax_anim_var,
+            font=FONT["small"], text_color=C["text_light"],
+            checkbox_width=16, checkbox_height=16,
+            fg_color=C["primary"], hover_color=C["primary_hover"],
+        ).pack(side="left", padx=(12, 0))
+
+        # Info
+        info_text = (
+            "Chọn nhiều project bên phải. Mỗi project map với thư mục con "
+            "cùng tên trong thư mục cha.\n"
+            "Mỗi subfolder cần có: narration/, law picture/, "
+            "1-insert-radio.txt, 2-delete-narration.txt, 3-insert-law-picture.txt.\n"
+            "Tool sẽ chạy tuần tự: Cut & Import → Xóa SRT → Sync Media → Insert Picture."
+        )
+        ctk.CTkLabel(f, text=info_text, font=("Segoe UI", 10),
+                     text_color=C["text_light"], justify="left", wraplength=520
+                     ).pack(anchor="w", pady=(4, 6))
+
+        self.promax_btn = ctk.CTkButton(
+            f, text="Run PROMAX", height=36, corner_radius=8,
+            fg_color=C["accent"], hover_color="#7c3aed",
+            text_color=C["text_white"], font=FONT["button"],
+            command=self._on_run_promax
+        )
+        self.promax_btn.pack(fill="x")
+
+    def _browse_promax_bg(self):
+        path = filedialog.askopenfilename(
+            title="Chọn video nền",
+            filetypes=[("Video", "*.mp4 *.mov *.avi *.mkv"), ("All", "*.*")]
+        )
+        if path:
+            self.promax_bg_var.set(path)
+
+    # ── PROMAX: Run ────────────────────────────────────────────────
+    def _on_run_promax(self):
+        try:
+            selected = self.app.project_list.get_selected()
+            if not selected:
+                self._set_info("Chưa chọn project nào!", C["red_light"], C["red"])
+                return
+
+            parent_folder = self.promax_parent_var.get().strip()
+            bg_video = self.promax_bg_var.get().strip()
+
+            if not parent_folder or not os.path.isdir(parent_folder):
+                self._set_info("Thư mục cha không hợp lệ!", C["red_light"], C["red"])
+                return
+            if not bg_video or not os.path.isfile(bg_video):
+                self._set_info("Video nền không hợp lệ!", C["red_light"], C["red"])
+                return
+
+            try:
+                speed = float(self.promax_speed_var.get())
+                if speed <= 0:
+                    raise ValueError
+            except ValueError:
+                self._set_info("Speed không hợp lệ!", C["red_light"], C["red"])
+                return
+
+            add_anim = self.promax_anim_var.get()
+
+            # Pre-flight validation: check all projects BEFORE running
+            errors = self._validate_promax_data(selected, parent_folder)
+            if errors:
+                err_text = "\n".join(errors)
+                self._append_log("[PROMAX VALIDATE] Data không hợp lệ:")
+                for e in errors:
+                    self._append_log(f"  - {e}")
+                self._set_info(
+                    f"Validate fail: {len(errors)} lỗi",
+                    C["red_light"], C["red"]
+                )
+                messagebox.showerror(
+                    "PROMAX — Validate Fail",
+                    "Kiểm tra dữ liệu thất bại. Chưa chạy gì cả.\n\n"
+                    + err_text
+                )
+                return
+
+            names = [d.get("draft_name", "?") for _, d in selected]
+            preview = ", ".join(names[:5]) + ("..." if len(names) > 5 else "")
+            confirm = messagebox.askokcancel(
+                "PROMAX",
+                f"Validate OK. Chạy {len(selected)} project:\n{preview}\n\n"
+                f"Parent: {parent_folder}\n"
+                f"BG: {os.path.basename(bg_video)}\n"
+                f"Speed: {speed}x | Animation: {'ON' if add_anim else 'OFF'}\n\n"
+                "Thoát CapCut trước khi tiếp tục.\nOK?"
+            )
+            if not confirm:
+                return
+
+            self.promax_btn.configure(state="disabled", text="Đang chạy...")
+            self._set_info(f"PROMAX: {len(selected)} projects...",
+                           C["primary_light"], C["primary"])
+
+            threading.Thread(
+                target=self._run_promax,
+                args=(selected, parent_folder, bg_video, speed, add_anim),
+                daemon=True
+            ).start()
+        except Exception as e:
+            import traceback
+            self._append_log(f"[PROMAX ERROR] {traceback.format_exc()}")
+            self._set_info(f"Lỗi: {e}", C["red_light"], C["red"])
+
+    def _validate_promax_data(self, selected, parent_folder):
+        """Check all projects have required folders + txt files.
+
+        Rules: file 2 (delete-narration.txt) can be empty.
+        File 1 (insert-radio.txt) and file 3 (insert-law-picture.txt) must NOT be empty.
+        Returns list of error strings (empty list = all OK).
+        """
+        errors = []
+        for idx, draft in selected:
+            name = draft.get("draft_name", "?")
+            draft_path = self._resolve_path(draft)
+            if not draft_path:
+                errors.append(f"[{name}] Không tìm thấy draft folder trong CapCut")
+                continue
+
+            sub = os.path.join(parent_folder, name)
+            if not os.path.isdir(sub):
+                errors.append(f"[{name}] Thiếu subfolder: {sub}")
+                continue
+
+            checks = [
+                ("narration/", os.path.isdir(os.path.join(sub, "narration")), None),
+                ("law picture/", os.path.isdir(os.path.join(sub, "law picture")), None),
+                ("1-insert-radio.txt",
+                 os.path.isfile(os.path.join(sub, "1-insert-radio.txt")),
+                 False),  # must not be empty
+                ("2-delete-narration.txt",
+                 os.path.isfile(os.path.join(sub, "2-delete-narration.txt")),
+                 True),   # can be empty
+                ("3-insert-law-picture.txt",
+                 os.path.isfile(os.path.join(sub, "3-insert-law-picture.txt")),
+                 False),  # must not be empty
+            ]
+            for label, exists, allow_empty in checks:
+                if not exists:
+                    errors.append(f"[{name}] Thiếu: {label}")
+                    continue
+                if allow_empty is False:
+                    try:
+                        txt = self._read_text(os.path.join(sub, label))
+                        if not txt.strip():
+                            errors.append(f"[{name}] File trống: {label}")
+                    except Exception as e:
+                        errors.append(f"[{name}] Không đọc được {label}: {e}")
+
+            # Also verify narration folder has at least 1 audio file
+            narr = os.path.join(sub, "narration")
+            if os.path.isdir(narr):
+                has_audio = any(
+                    f.lower().endswith((".mp3", ".wav", ".aac", ".m4a", ".ogg"))
+                    for f in os.listdir(narr)
+                )
+                if not has_audio:
+                    errors.append(f"[{name}] narration/ không có file audio")
+
+            # Picture folder must have at least 1 image
+            pic = os.path.join(sub, "law picture")
+            if os.path.isdir(pic):
+                has_img = any(
+                    f.lower().endswith((".jpg", ".jpeg", ".png", ".webp", ".bmp"))
+                    for f in os.listdir(pic)
+                )
+                if not has_img:
+                    errors.append(f"[{name}] law picture/ không có file ảnh")
+
+        return errors
+
+    def _run_promax(self, selected, parent_folder, bg_video, speed, add_anim):
+        root = self.app.root
+        _log = self._make_log_fn()
+
+        ok_count = 0
+        fail_count = 0
+        total = len(selected)
+
+        for i, (idx, draft) in enumerate(selected, start=1):
+            name = draft.get("draft_name", "?")
+            draft_path = self._resolve_path(draft)
+
+            _log(f"── [{i}/{total}] PROMAX: {name} ──")
+            root.after(0, self.app.project_list.set_status, idx, "...", C["primary"])
+            root.after(0, self._set_info,
+                       f"[{i}/{total}] {name}...",
+                       C["primary_light"], C["primary"])
+
+            if not draft_path:
+                _log(f"  FAIL: draft folder not found")
+                root.after(0, self.app.project_list.set_status, idx, "Fail", C["red"])
+                fail_count += 1
+                continue
+
+            sub_folder = os.path.join(parent_folder, name)
+            if not os.path.isdir(sub_folder):
+                _log(f"  SKIP: subfolder not found: {sub_folder}")
+                root.after(0, self.app.project_list.set_status, idx, "Skip", C["red"])
+                fail_count += 1
+                continue
+
+            narration_folder = os.path.join(sub_folder, "narration")
+            picture_folder = os.path.join(sub_folder, "law picture")
+            cut_file = os.path.join(sub_folder, "1-insert-radio.txt")
+            delete_file = os.path.join(sub_folder, "2-delete-narration.txt")
+            pic_file = os.path.join(sub_folder, "3-insert-law-picture.txt")
+
+            missing = []
+            if not os.path.isdir(narration_folder):
+                missing.append("narration/")
+            if not os.path.isdir(picture_folder):
+                missing.append("law picture/")
+            if not os.path.isfile(cut_file):
+                missing.append("1-insert-radio.txt")
+            if not os.path.isfile(delete_file):
+                missing.append("2-delete-narration.txt")
+            if not os.path.isfile(pic_file):
+                missing.append("3-insert-law-picture.txt")
+            if missing:
+                _log(f"  FAIL: missing {', '.join(missing)}")
+                root.after(0, self.app.project_list.set_status, idx, "Fail", C["red"])
+                fail_count += 1
+                continue
+
+            try:
+                cut_text = self._read_text(cut_file)
+                delete_text = self._read_text(delete_file)
+                pic_text = self._read_text(pic_file)
+            except Exception as e:
+                _log(f"  FAIL: read txt error: {e}")
+                root.after(0, self.app.project_list.set_status, idx, "Fail", C["red"])
+                fail_count += 1
+                continue
+
+            project_ok = True
+
+            # Step 1: Cut & Import
+            _log(f"  [1/4] Cut & Import Audio")
+            try:
+                r = sync_sub_engine.cut_and_import_audio(
+                    draft_path, narration_folder, bg_video, cut_text,
+                    backup=True, log_fn=_log
+                )
+                if not r.success:
+                    _log(f"    FAIL: {r.message}")
+                    project_ok = False
+                else:
+                    _log(f"    OK: {r.message}")
+            except Exception as e:
+                import traceback
+                _log(f"    EXCEPTION: {traceback.format_exc()}")
+                project_ok = False
+
+            # Step 2: Delete SRT (optional)
+            if project_ok:
+                if delete_text.strip():
+                    _log(f"  [2/4] Xóa SRT")
+                    try:
+                        r = sync_sub_engine.delete_srt_and_cut(
+                            draft_path, delete_text, backup=True, log_fn=_log
+                        )
+                        if not r.success:
+                            _log(f"    FAIL: {r.message}")
+                            project_ok = False
+                        else:
+                            _log(f"    OK: {r.message}")
+                    except Exception as e:
+                        import traceback
+                        _log(f"    EXCEPTION: {traceback.format_exc()}")
+                        project_ok = False
+                else:
+                    _log(f"  [2/4] Xóa SRT: file trống, bỏ qua")
+
+            # Step 3: Sync Media
+            if project_ok:
+                _log(f"  [3/4] Sync Media @{speed}x")
+                try:
+                    r = sync_sub_engine.sync_media_sub(
+                        draft_path, speed=speed, backup=True, log_fn=_log
+                    )
+                    if not r.success:
+                        _log(f"    FAIL: {r.message}")
+                        project_ok = False
+                    else:
+                        _log(f"    OK: {r.message}")
+                except Exception as e:
+                    import traceback
+                    _log(f"    EXCEPTION: {traceback.format_exc()}")
+                    project_ok = False
+
+            # Step 4: Insert Picture
+            if project_ok:
+                _log(f"  [4/4] Insert Picture")
+                try:
+                    r = sync_sub_engine.insert_picture_law(
+                        draft_path, picture_folder, pic_text,
+                        add_animation=add_anim, backup=True, log_fn=_log
+                    )
+                    if not r.success:
+                        _log(f"    FAIL: {r.message}")
+                        project_ok = False
+                    else:
+                        _log(f"    OK: {r.message}")
+                except Exception as e:
+                    import traceback
+                    _log(f"    EXCEPTION: {traceback.format_exc()}")
+                    project_ok = False
+
+            if project_ok:
+                ok_count += 1
+                root.after(0, self.app.project_list.set_status, idx, "Done", C["green"])
+                _log(f"  ✓ DONE: {name}")
+            else:
+                fail_count += 1
+                root.after(0, self.app.project_list.set_status, idx, "Fail", C["red"])
+                _log(f"  ✗ FAIL: {name}")
+
+        summary = f"PROMAX xong: {ok_count}/{total} OK, {fail_count} fail"
+        _log(f"══ {summary} ══")
+        color_bg = C["green_light"] if fail_count == 0 else C["red_light"]
+        color_fg = C["green"] if fail_count == 0 else C["red"]
+        root.after(0, self._set_info, summary, color_bg, color_fg)
+        root.after(0, lambda: self.promax_btn.configure(
+            state="normal", text="Run PROMAX"))
+
+    @staticmethod
+    def _read_text(path: str) -> str:
+        for enc in ("utf-8-sig", "utf-8", "utf-16", "cp1252"):
+            try:
+                with open(path, "r", encoding=enc) as f:
+                    return f.read()
+            except UnicodeDecodeError:
+                continue
+        with open(path, "rb") as f:
+            return f.read().decode("utf-8", errors="ignore")

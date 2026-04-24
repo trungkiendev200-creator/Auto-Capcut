@@ -82,6 +82,10 @@ def sync_project(
             v_segs[i]["target_timerange"]["start"] = a_start
             v_segs[i]["target_timerange"]["duration"] = a_dur
 
+            # Tắt âm video sync (narration audio thay thế)
+            v_segs[i]["volume"] = 0.0
+            v_segs[i]["last_nonzero_volume"] = 0.0
+
             if mat_type == "photo":
                 # Ảnh: chỉ thay đổi target, không cần xử lý speed/source
                 pass
