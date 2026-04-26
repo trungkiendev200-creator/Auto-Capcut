@@ -281,14 +281,30 @@ def _make_audio_segment(material_id: str, start: int, duration: int,
     }
 
 
-def create_project(config: CreateConfig, capcut_path: str) -> CreateResult:
-    """Tạo project CapCut mới."""
-    # Scan media files
-    media_files = _scan_files(config.media_folder, IMAGE_EXTS | VIDEO_EXTS)
+def create_project(
+    config: CreateConfig,
+    capcut_path: str,
+    media_files_override: list[str] | None = None,
+    audio_files_override: list[str] | None = None,
+) -> CreateResult:
+    """Tạo project CapCut mới.
+
+    Args:
+        media_files_override: nếu truyền vào, bỏ qua scan media_folder và dùng list này.
+        audio_files_override: nếu truyền vào, bỏ qua scan audio_folder và dùng list này.
+    """
+    # Scan media files (hoặc dùng override)
+    if media_files_override is not None:
+        media_files = list(media_files_override)
+    else:
+        media_files = _scan_files(config.media_folder, IMAGE_EXTS | VIDEO_EXTS)
     if not media_files:
         return CreateResult(False, "No images/videos found in folder")
 
-    audio_files = _scan_files(config.audio_folder, AUDIO_EXTS)
+    if audio_files_override is not None:
+        audio_files = list(audio_files_override)
+    else:
+        audio_files = _scan_files(config.audio_folder, AUDIO_EXTS)
 
     # Canvas config
     canvas = CANVAS_PRESETS.get(config.ratio, CANVAS_PRESETS["16:9"]).copy()
@@ -651,4 +667,89 @@ def batch_create_projects(
             if callback: callback(f"  FAIL: {r.message}")
 
     if callback: callback(f"Batch done: {result.created}/{len(matched)} created, {len(result.skipped)} skipped")
+    return result
+
+
+def batch_create_from_videos(
+    folder: str,
+    capcut_path: str,
+    ratio: str = "16:9",
+    quality: str = "1080p",
+    fps: int = 30,
+    callback=None,
+) -> BatchResult:
+    """Tạo project cho mỗi file video trong folder. Tên project = tên file (không ext).
+
+    - Skip nếu CapCut đã có project trùng tên.
+    - Mỗi project chứa đúng 1 video segment (full video).
+    - Audio embed trong video file sẽ được CapCut tự detect khi import.
+    """
+    from core import capcut as _cap
+
+    result = BatchResult()
+
+    if not os.path.isdir(folder):
+        if callback: callback(f"Folder not found: {folder}")
+        return result
+
+    # Scan video files (1 cấp, không recursive)
+    video_files = []
+    for f in sorted(os.listdir(folder)):
+        full = os.path.join(folder, f)
+        if not os.path.isfile(full):
+            continue
+        ext = os.path.splitext(f)[1].lower()
+        if ext in VIDEO_EXTS or ext in {".m4v", ".webm"}:
+            video_files.append(full)
+
+    result.total = len(video_files)
+    if not video_files:
+        if callback: callback("Không tìm thấy file video nào trong folder")
+        return result
+
+    # Lấy danh sách project hiện có để skip duplicate
+    try:
+        existing = {d.get("draft_name", "") for d in _cap.load_projects(capcut_path)}
+    except Exception as e:
+        if callback: callback(f"Cannot load existing projects: {e}")
+        existing = set()
+
+    if callback:
+        callback(f"Found {len(video_files)} videos. {len(existing)} existing projects.")
+
+    for video_path in video_files:
+        name = os.path.splitext(os.path.basename(video_path))[0]
+
+        if name in existing:
+            msg = f"SKIP '{name}': project đã tồn tại"
+            result.skipped.append(msg)
+            if callback: callback(msg)
+            continue
+
+        config = CreateConfig(
+            project_name=name,
+            media_folder="",  # Không dùng vì có override
+            audio_folder="",
+            image_duration=4.0,
+            ratio=ratio,
+            quality=quality,
+            fps=fps,
+        )
+
+        if callback: callback(f"Creating '{name}'...")
+        r = create_project(
+            config, capcut_path,
+            media_files_override=[video_path],
+            audio_files_override=[],
+        )
+        if r.success:
+            result.created += 1
+            existing.add(name)  # tránh trùng nếu folder có file tên giống nhau khác ext
+            if callback: callback(f"  OK: {r.message}")
+        else:
+            result.skipped.append(f"FAIL '{name}': {r.message}")
+            if callback: callback(f"  FAIL: {r.message}")
+
+    if callback:
+        callback(f"Batch done: {result.created}/{result.total} created, {len(result.skipped)} skipped")
     return result
