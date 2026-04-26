@@ -14,6 +14,7 @@ from ui.tabs.animation_tab import AnimationTab
 from ui.tabs.transition_tab import TransitionTab
 from ui.tabs.effect_tab import EffectTab
 from ui.tabs.create_project_tab import CreateProjectTab
+from ui.tabs.cut_percent_tab import CutPercentTab
 from ui.tabs import placeholder
 from core import capcut, settings
 
@@ -72,6 +73,7 @@ class AutoCapcut:
 
         self.create_tab = CreateProjectTab(tabview.add("Create Project"), app=self)
         self.sync_tab = SyncTab(tabview.add("Sync Audio"), app=self)
+        self.cut_percent_tab = CutPercentTab(tabview.add("Cut %"), app=self)
         self.sync_sub_tab = SyncSubTab(tabview.add("VIP5AE"), app=self)
         self.keyframe_tab = KeyFrameTab(tabview.add("Key Frame"), app=self)
         self.animation_tab = AnimationTab(tabview.add("Animation"), app=self)
