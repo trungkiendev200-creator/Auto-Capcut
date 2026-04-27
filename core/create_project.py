@@ -194,7 +194,15 @@ def _make_speed_material() -> dict:
     return {"id": _uid(), "type": "speed", "mode": 0, "speed": 1.0, "curve_speed": None}
 
 
-def _make_canvas_material() -> dict:
+def _make_canvas_material(canvas_blur: bool = False) -> dict:
+    if canvas_blur:
+        # Match CapCut native "Canvas → Blur" schema
+        return {
+            "id": _uid(), "type": "canvas_blur",
+            "color": "", "blur": 0.0625, "image": "",
+            "album_image": "", "image_id": "", "image_name": "",
+            "source_platform": 0, "team_id": "",
+        }
     return {
         "id": _uid(), "type": "canvas_color",
         "color": "", "image_id": "", "image_name": "",
@@ -286,12 +294,14 @@ def create_project(
     capcut_path: str,
     media_files_override: list[str] | None = None,
     audio_files_override: list[str] | None = None,
+    canvas_blur: bool = False,
 ) -> CreateResult:
     """Tạo project CapCut mới.
 
     Args:
         media_files_override: nếu truyền vào, bỏ qua scan media_folder và dùng list này.
         audio_files_override: nếu truyền vào, bỏ qua scan audio_folder và dùng list này.
+        canvas_blur: True = canvas của mọi segment dùng "blur" thay vì "color".
     """
     # Scan media files (hoặc dùng override)
     if media_files_override is not None:
@@ -342,7 +352,7 @@ def create_project(
 
         speed = _make_speed_material()
         speed_materials.append(speed)
-        cnv = _make_canvas_material()
+        cnv = _make_canvas_material(canvas_blur=canvas_blur)
         canvas_materials.append(cnv)
         snd = _make_sound_channel()
         sound_channels.append(snd)
@@ -753,3 +763,210 @@ def batch_create_from_videos(
     if callback:
         callback(f"Batch done: {result.created}/{result.total} created, {len(result.skipped)} skipped")
     return result
+
+
+def batch_create_manhwa_projects(
+    picture_parent: str,
+    video_parent: str,
+    capcut_path: str,
+    image_duration: float = 4.0,
+    ratio: str = "16:9",
+    quality: str = "1080p",
+    fps: int = 30,
+    canvas_blur: bool = False,
+    callback=None,
+) -> BatchResult:
+    """Tạo project Manhwa: mỗi cặp (subfolder ảnh, file video) → 1 project.
+
+    Mapping: subfolder name == video filename (không ext) == project name.
+
+    Mỗi project chứa:
+        - Video track: tất cả ảnh trong subfolder (sorted natural), mỗi ảnh
+          duration = image_duration giây.
+        - Audio track: 1 audio segment duy nhất, type=video_original_sound,
+          trỏ TRỰC TIẾP về file video → CapCut tự decode audio. Không có
+          video segment cho file MP4 trên timeline.
+
+    Skip nếu:
+        - Subfolder không có ảnh
+        - Project đã tồn tại trong CapCut
+    """
+    from core import capcut as _cap, cut_percent_engine as _cpe
+
+    result = BatchResult()
+
+    if not os.path.isdir(picture_parent):
+        if callback: callback(f"Picture parent không tồn tại: {picture_parent}")
+        return result
+    if not os.path.isdir(video_parent):
+        if callback: callback(f"Video parent không tồn tại: {video_parent}")
+        return result
+
+    # Scan picture parent for subfolders
+    pic_subs = {d for d in os.listdir(picture_parent)
+                if os.path.isdir(os.path.join(picture_parent, d))}
+
+    # Scan video parent for video files (map basename → full path)
+    video_exts = VIDEO_EXTS | {".m4v", ".webm"}
+    video_files = {}
+    for f in os.listdir(video_parent):
+        full = os.path.join(video_parent, f)
+        if not os.path.isfile(full):
+            continue
+        ext = os.path.splitext(f)[1].lower()
+        if ext in video_exts:
+            base = os.path.splitext(f)[0]
+            video_files[base] = full
+
+    matched = sorted(pic_subs & set(video_files.keys()))
+    skipped_pic = sorted(pic_subs - set(video_files.keys()))
+    skipped_vid = sorted(set(video_files.keys()) - pic_subs)
+
+    result.total = len(pic_subs)
+
+    for n in skipped_pic:
+        msg = f"SKIP '{n}': có ảnh nhưng KHÔNG có video"
+        result.skipped.append(msg)
+        if callback: callback(msg)
+    for n in skipped_vid:
+        msg = f"SKIP video '{n}': không có subfolder ảnh tương ứng"
+        result.skipped.append(msg)
+        if callback: callback(msg)
+
+    if not matched:
+        if callback: callback("Không tìm thấy cặp subfolder + video nào trùng tên")
+        return result
+
+    # Existing projects để tránh trùng
+    try:
+        existing = {d.get("draft_name", "") for d in _cap.load_projects(capcut_path)}
+    except Exception:
+        existing = set()
+
+    if callback:
+        callback(f"Found {len(matched)} matched. {len(existing)} existing projects.")
+
+    for name in matched:
+        if name in existing:
+            msg = f"SKIP '{name}': project đã tồn tại"
+            result.skipped.append(msg)
+            if callback: callback(msg)
+            continue
+
+        pic_folder = os.path.join(picture_parent, name)
+        video_path = video_files[name]
+
+        # Scan ảnh trong subfolder (sorted natural)
+        images = _scan_files(pic_folder, IMAGE_EXTS)
+        if not images:
+            msg = f"SKIP '{name}': subfolder không có ảnh"
+            result.skipped.append(msg)
+            if callback: callback(msg)
+            continue
+
+        if callback:
+            callback(f"Creating '{name}': {len(images)} ảnh + audio từ {os.path.basename(video_path)}")
+
+        # Bước 1: tạo project với ảnh (override media_files = list ảnh)
+        config = CreateConfig(
+            project_name=name,
+            media_folder="",
+            audio_folder="",
+            image_duration=image_duration,
+            ratio=ratio,
+            quality=quality,
+            fps=fps,
+        )
+        r = create_project(
+            config, capcut_path,
+            media_files_override=images,
+            audio_files_override=[],
+            canvas_blur=canvas_blur,
+        )
+        if not r.success:
+            msg = f"FAIL '{name}' create: {r.message}"
+            result.skipped.append(msg)
+            if callback: callback(msg)
+            continue
+
+        # Bước 2: append audio track trỏ về video file
+        try:
+            _attach_video_original_audio(r.project_path, video_path)
+        except Exception as e:
+            msg = f"FAIL '{name}' attach audio: {e}"
+            result.skipped.append(msg)
+            if callback: callback(msg)
+            continue
+
+        result.created += 1
+        existing.add(name)
+        if callback: callback(f"  OK: {name}")
+
+    if callback:
+        callback(f"Batch done: {result.created}/{len(matched)} created, "
+                 f"{len(result.skipped)} skipped")
+    return result
+
+
+def _attach_video_original_audio(draft_path: str, video_path: str) -> None:
+    """Append 1 audio track có audio segment trỏ về file video (no video segment)."""
+    from core import capcut, cut_percent_engine as cpe
+
+    info = _get_media_info(video_path)
+    vid_dur = info.get("duration", 0)
+    if vid_dur <= 0:
+        raise RuntimeError(f"Cannot read video duration: {video_path}")
+
+    data = capcut.load_draft_content(draft_path)
+
+    # Audio material giả lập video material để dùng helper từ cut_percent_engine
+    fake_vmat = {
+        "path": video_path.replace("\\", "/"),
+        "duration": vid_dur,
+        "name": os.path.splitext(os.path.basename(video_path))[0],
+    }
+    a_mat = cpe._make_audio_material_from_video(fake_vmat)
+    data.setdefault("materials", {}).setdefault("audios", []).append(a_mat)
+
+    # 5 extra materials (speed, placeholder_info, beats, sound_channel, vocal_separation)
+    extra_refs, extras = cpe._make_extract_extras()
+    for key, mat in extras:
+        data["materials"].setdefault(key, []).append(mat)
+
+    # Audio segment với target/source = full video duration
+    fake_vseg = {
+        "source_timerange": {"start": 0, "duration": vid_dur},
+        "target_timerange": {"start": 0, "duration": vid_dur},
+    }
+    a_seg = cpe._make_audio_segment_from_video(a_mat["id"], extra_refs, fake_vseg)
+
+    audio_track = {
+        "id": _uid(), "type": "audio", "segments": [a_seg],
+        "flag": 0, "attribute": 0, "name": "", "is_default_name": True,
+    }
+    data.setdefault("tracks", []).append(audio_track)
+
+    # Kéo ảnh cuối cùng để END = audio_END + 0.2s
+    # new_last_dur = (vid_dur + 200_000) - last_target_start
+    PADDING_AFTER = 200_000  # 0.2s
+    target_end = vid_dur + PADDING_AFTER
+    for t in data.get("tracks", []):
+        if t.get("type") != "video":
+            continue
+        segs = t.get("segments", [])
+        if not segs:
+            continue
+        last = max(segs, key=lambda s: s["target_timerange"]["start"])
+        last_start = last["target_timerange"]["start"]
+        new_last_dur = target_end - last_start
+        if new_last_dur > 0:
+            last["target_timerange"]["duration"] = new_last_dur
+            # Update source.duration cùng giá trị (cần thiết với segment ảnh)
+            last["source_timerange"]["duration"] = new_last_dur
+        # Chỉ chỉnh main video track (track đầu tiên có segments)
+        break
+
+    # Update duration project = end của image track (= audio + 0.2s)
+    data["duration"] = target_end
+
+    capcut.save_draft_content(draft_path, data)

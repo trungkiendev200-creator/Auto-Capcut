@@ -37,6 +37,7 @@ class CreateProject2Tab:
         sub_tabs.grid(row=0, column=0, sticky="nsew")
 
         self._build_from_videos_tab(sub_tabs.add("Base on folder video"))
+        self._build_manhwa_tab(sub_tabs.add("Manhwa"))
 
         # Info bar
         self.info = ctk.CTkLabel(
@@ -234,5 +235,238 @@ class CreateProject2Tab:
         root.after(0, lambda: self.app.status_var.set(f"  {summary}"))
 
         # Refresh project list để thấy project mới
+        if r.created > 0:
+            root.after(0, self.app._load_projects)
+
+    # ── Sub-tab: Manhwa ────────────────────────────────────────────
+    def _build_manhwa_tab(self, parent):
+        f = ctk.CTkFrame(parent, fg_color="transparent")
+        f.pack(fill="both", expand=True, padx=10, pady=8)
+
+        ctk.CTkLabel(
+            f,
+            text="Mỗi cặp (subfolder ảnh, file video) cùng tên → 1 project. "
+                 "Project chứa các ảnh trong subfolder + audio trích từ video.",
+            font=("Segoe UI", 10), text_color=C["text_light"],
+            justify="left", wraplength=540,
+        ).pack(anchor="w", pady=(0, 8))
+
+        # Parent picture
+        r1 = ctk.CTkFrame(f, fg_color="transparent")
+        r1.pack(fill="x", pady=(0, 4))
+        ctk.CTkLabel(r1, text="Parent PICTURE:", width=120, anchor="w",
+                     font=FONT["small"], text_color=C["text_light"]).pack(side="left")
+        self.mh_pic_parent_var = ctk.StringVar()
+        ctk.CTkEntry(r1, textvariable=self.mh_pic_parent_var, height=28,
+                     fg_color=C["input_bg"], border_color=C["input_border"],
+                     text_color=C["text"], corner_radius=6, font=FONT["small"]
+                     ).pack(side="left", fill="x", expand=True, padx=(4, 4))
+        ctk.CTkButton(r1, text="...", width=28, height=28, corner_radius=6,
+                      fg_color=C["tab_bg"], text_color=C["text"],
+                      hover_color=C["primary_muted"], border_width=1,
+                      border_color=C["input_border"], font=FONT["small"],
+                      command=lambda: self._browse_dir_to(self.mh_pic_parent_var)
+                      ).pack(side="left")
+
+        # Parent video
+        r2 = ctk.CTkFrame(f, fg_color="transparent")
+        r2.pack(fill="x", pady=(0, 4))
+        ctk.CTkLabel(r2, text="Parent VIDEO:", width=120, anchor="w",
+                     font=FONT["small"], text_color=C["text_light"]).pack(side="left")
+        self.mh_vid_parent_var = ctk.StringVar()
+        ctk.CTkEntry(r2, textvariable=self.mh_vid_parent_var, height=28,
+                     fg_color=C["input_bg"], border_color=C["input_border"],
+                     text_color=C["text"], corner_radius=6, font=FONT["small"]
+                     ).pack(side="left", fill="x", expand=True, padx=(4, 4))
+        ctk.CTkButton(r2, text="...", width=28, height=28, corner_radius=6,
+                      fg_color=C["tab_bg"], text_color=C["text"],
+                      hover_color=C["primary_muted"], border_width=1,
+                      border_color=C["input_border"], font=FONT["small"],
+                      command=lambda: self._browse_dir_to(self.mh_vid_parent_var)
+                      ).pack(side="left")
+
+        # Settings card
+        sett = ctk.CTkFrame(f, fg_color=C["primary_light"], corner_radius=6)
+        sett.pack(fill="x", pady=(8, 8))
+        s = ctk.CTkFrame(sett, fg_color="transparent")
+        s.pack(fill="x", padx=10, pady=8)
+
+        ctk.CTkLabel(s, text="Image dur:", font=FONT["small"],
+                     text_color=C["text"]).pack(side="left")
+        self.mh_image_dur_var = ctk.StringVar(value="4")
+        ctk.CTkEntry(s, textvariable=self.mh_image_dur_var, height=28, width=55,
+                     fg_color=C["card"], border_color=C["input_border"],
+                     text_color=C["text"], corner_radius=6, font=FONT["small"],
+                     justify="center"
+                     ).pack(side="left", padx=(4, 2))
+        ctk.CTkLabel(s, text="(s)", font=FONT["small"],
+                     text_color=C["text_light"]).pack(side="left", padx=(0, 12))
+
+        ctk.CTkLabel(s, text="Ratio:", font=FONT["small"],
+                     text_color=C["text"]).pack(side="left")
+        self.mh_ratio_var = ctk.StringVar(value="16:9")
+        ctk.CTkOptionMenu(s, variable=self.mh_ratio_var,
+                          values=["16:9", "9:16", "1:1", "4:3"],
+                          width=70, height=28, corner_radius=6,
+                          fg_color=C["card"], button_color=C["primary"],
+                          text_color=C["text"], font=FONT["small"]
+                          ).pack(side="left", padx=(4, 12))
+
+        ctk.CTkLabel(s, text="Quality:", font=FONT["small"],
+                     text_color=C["text"]).pack(side="left")
+        self.mh_quality_var = ctk.StringVar(value="1080p")
+        ctk.CTkOptionMenu(s, variable=self.mh_quality_var,
+                          values=["1080p", "720p", "4K"],
+                          width=80, height=28, corner_radius=6,
+                          fg_color=C["card"], button_color=C["primary"],
+                          text_color=C["text"], font=FONT["small"]
+                          ).pack(side="left", padx=(4, 12))
+
+        ctk.CTkLabel(s, text="FPS:", font=FONT["small"],
+                     text_color=C["text"]).pack(side="left")
+        self.mh_fps_var = ctk.StringVar(value="30")
+        ctk.CTkOptionMenu(s, variable=self.mh_fps_var,
+                          values=["30", "60"],
+                          width=60, height=28, corner_radius=6,
+                          fg_color=C["card"], button_color=C["primary"],
+                          text_color=C["text"], font=FONT["small"]
+                          ).pack(side="left", padx=(4, 0))
+
+        # Canvas Blur checkbox
+        r_blur = ctk.CTkFrame(f, fg_color="transparent")
+        r_blur.pack(fill="x", pady=(0, 8))
+        self.mh_canvas_blur_var = tk.BooleanVar(value=False)
+        ctk.CTkCheckBox(
+            r_blur, text="Canvas Blur (apply to all images)",
+            variable=self.mh_canvas_blur_var,
+            font=FONT["small"], text_color=C["text"],
+            checkbox_width=16, checkbox_height=16,
+            fg_color=C["primary"], hover_color=C["primary_hover"],
+        ).pack(side="left")
+
+        self.mh_btn = ctk.CTkButton(
+            f, text="Tạo dự án và xuất âm thanh", height=36, corner_radius=8,
+            fg_color=C["accent"], hover_color="#7c3aed",
+            text_color=C["text_white"], font=FONT["button"],
+            command=self._on_manhwa_create
+        )
+        self.mh_btn.pack(fill="x")
+
+    def _browse_dir_to(self, var):
+        path = filedialog.askdirectory()
+        if path:
+            var.set(path)
+
+    def _on_manhwa_create(self):
+        pic = self.mh_pic_parent_var.get().strip()
+        vid = self.mh_vid_parent_var.get().strip()
+        if not pic or not os.path.isdir(pic):
+            self._set_info("Parent PICTURE không hợp lệ!", C["red_light"], C["red"])
+            return
+        if not vid or not os.path.isdir(vid):
+            self._set_info("Parent VIDEO không hợp lệ!", C["red_light"], C["red"])
+            return
+
+        capcut_path = self.app.capcut_path.get().strip()
+        if not capcut_path or not os.path.isdir(capcut_path):
+            self._set_info("CapCut path chưa cấu hình!", C["red_light"], C["red"])
+            return
+
+        try:
+            img_dur = float(self.mh_image_dur_var.get())
+            if img_dur <= 0:
+                raise ValueError
+        except ValueError:
+            self._set_info("Image duration không hợp lệ!", C["red_light"], C["red"])
+            return
+
+        try:
+            fps = int(self.mh_fps_var.get())
+        except ValueError:
+            self._set_info("FPS không hợp lệ!", C["red_light"], C["red"])
+            return
+
+        ratio = self.mh_ratio_var.get()
+        quality = self.mh_quality_var.get()
+        canvas_blur = self.mh_canvas_blur_var.get()
+
+        # Quick scan to show count in confirm dialog
+        try:
+            pic_subs = [d for d in os.listdir(pic)
+                        if os.path.isdir(os.path.join(pic, d))]
+            video_exts = {".mp4", ".mov", ".avi", ".mkv", ".m4v", ".webm"}
+            vid_basenames = {os.path.splitext(f)[0] for f in os.listdir(vid)
+                             if os.path.isfile(os.path.join(vid, f))
+                             and os.path.splitext(f)[1].lower() in video_exts}
+            matched = sorted(set(pic_subs) & vid_basenames)
+        except Exception as e:
+            self._set_info(f"Lỗi scan: {e}", C["red_light"], C["red"])
+            return
+
+        if not matched:
+            self._set_info("Không có cặp subfolder + video nào trùng tên!",
+                           C["red_light"], C["red"])
+            return
+
+        confirm = messagebox.askokcancel(
+            "Tạo Manhwa projects",
+            f"{len(matched)} matched pair(s):\n"
+            f"{', '.join(matched[:5])}{'...' if len(matched) > 5 else ''}\n\n"
+            f"Image duration: {img_dur}s | {ratio} | {quality} | {fps}fps\n"
+            f"Canvas Blur: {'ON' if canvas_blur else 'OFF'}\n\n"
+            "Project trùng tên sẽ skip.\n"
+            "Thoát CapCut trước khi tiếp tục.\nOK?"
+        )
+        if not confirm:
+            return
+
+        self.mh_btn.configure(state="disabled", text="Đang tạo...")
+        self._set_info(f"Đang tạo {len(matched)} project...",
+                       C["primary_light"], C["primary"])
+
+        threading.Thread(
+            target=self._run_manhwa,
+            args=(pic, vid, capcut_path, img_dur, ratio, quality, fps, canvas_blur),
+            daemon=True,
+        ).start()
+
+    def _run_manhwa(self, pic, vid, capcut_path, img_dur, ratio, quality, fps, canvas_blur):
+        root = self.app.root
+
+        def cb(msg):
+            root.after(0, self._append_log, msg)
+
+        try:
+            r = cp.batch_create_manhwa_projects(
+                picture_parent=pic,
+                video_parent=vid,
+                capcut_path=capcut_path,
+                image_duration=img_dur,
+                ratio=ratio,
+                quality=quality,
+                fps=fps,
+                canvas_blur=canvas_blur,
+                callback=cb,
+            )
+        except Exception as e:
+            import traceback
+            cb(f"[EXCEPTION] {traceback.format_exc()}")
+            r = cp.BatchResult()
+
+        summary = (f"Manhwa: {r.created}/{r.total} created, "
+                   f"{len(r.skipped)} skipped")
+        cb(f"══ {summary} ══")
+
+        if r.created > 0 and not r.skipped:
+            bg, fg = C["green_light"], C["green"]
+        elif r.created == 0:
+            bg, fg = C["red_light"], C["red"]
+        else:
+            bg, fg = C["primary_light"], C["primary"]
+        root.after(0, self._set_info, summary, bg, fg)
+        root.after(0, lambda: self.mh_btn.configure(
+            state="normal", text="Tạo dự án và xuất âm thanh"))
+        root.after(0, lambda: self.app.status_var.set(f"  {summary}"))
+
         if r.created > 0:
             root.after(0, self.app._load_projects)
