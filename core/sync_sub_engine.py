@@ -122,11 +122,11 @@ def _scan_media_files(folder: str) -> list[str]:
 def parse_cut_input(text: str) -> list[tuple[int, list[int]]]:
     """
     Parse input dạng:
-        55: 1, 2, 3
+        0: 1, 2, 3        ← chèn ở đầu timeline (trước sub 1)
+        55: 1, 2, 3       ← chèn sau sub 55
         443: 4, 5, 6, 7
-        574: 18, 19, 20
 
-    Returns: [(55, [1,2,3]), (443, [4,5,6,7]), (574, [18,19,20])]
+    Returns: [(0, [1,2,3]), (55, [1,2,3]), ...]
     """
     result = []
     for line in text.strip().splitlines():
@@ -137,7 +137,7 @@ def parse_cut_input(text: str) -> list[tuple[int, list[int]]]:
         try:
             sub_idx = int(parts[0].strip())
             audio_nums = [int(x.strip()) for x in parts[1].split(",") if x.strip()]
-            if sub_idx > 0 and audio_nums:
+            if sub_idx >= 0 and audio_nums:
                 result.append((sub_idx, audio_nums))
         except ValueError:
             continue
@@ -251,8 +251,12 @@ def cut_and_import_audio(
     # ── Phase 1: Thu thập thông tin tất cả cuts ──
     cut_infos = []  # (cut_time_original, insert_dur, audio_files, audio_durations)
     for sub_idx, audio_nums in cuts:
-        sub = en_subs[sub_idx - 1]
-        cut_time = sub.end
+        if sub_idx == 0:
+            # Special case: chèn ở ĐẦU timeline (trước sub 1)
+            cut_time = 0
+        else:
+            sub = en_subs[sub_idx - 1]
+            cut_time = sub.end
 
         audio_files = []
         audio_durations = []
@@ -303,15 +307,17 @@ def cut_and_import_audio(
                            if t_start < ct < t_end]
 
             if not cuts_in_seg:
-                # Không có cut → shift toàn bộ segment
-                offset = calc_offset_strict(t_start)
+                # Không có cut → shift toàn bộ segment.
+                # Dùng INCLUSIVE: segment có t_start = cut_time (boundary, đặc biệt
+                # khi sub_idx=0 → cut_time=0) cũng phải shift.
+                offset = calc_offset_inclusive(t_start)
                 seg["target_timerange"]["start"] = t_start + offset
                 new_segs.append(seg)
             else:
                 # Có cut(s) → split segment
                 prev_time = t_start
                 prev_source = s_start
-                accumulated_insert = calc_offset_strict(t_start)
+                accumulated_insert = calc_offset_inclusive(t_start)
 
                 for ct, idur in cuts_in_seg:
                     # Part trước cut

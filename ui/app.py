@@ -16,6 +16,7 @@ from ui.tabs.effect_tab import EffectTab
 from ui.tabs.create_project_tab import CreateProjectTab
 from ui.tabs.create_project_2_tab import CreateProject2Tab
 from ui.tabs.cut_percent_tab import CutPercentTab
+from ui.tabs.caption_tab import CaptionTab
 from ui.tabs import placeholder
 from core import capcut, settings
 
@@ -82,8 +83,7 @@ class AutoCapcut:
         self.transition_tab = TransitionTab(tabview.add("Transitions"), app=self)
         self.effect_tab = EffectTab(tabview.add("Effect"), app=self)
 
-        for name in ["Caption"]:
-            placeholder.build(tabview.add(name), name)
+        self.caption_tab = CaptionTab(tabview.add("Caption"), app=self)
 
         log_tab = tabview.add("Log")
         self.log_box = ctk.CTkTextbox(
