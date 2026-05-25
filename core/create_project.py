@@ -504,6 +504,37 @@ def create_project(
     with open(content_path, "w", encoding="utf-8") as f:
         json.dump(draft_content, f, ensure_ascii=False)
 
+    # Save Timelines/<project_id>/draft_content.json (CapCut mới yêu cầu)
+    timelines_dir = os.path.join(project_folder, "Timelines", project_id)
+    os.makedirs(timelines_dir, exist_ok=True)
+    tl_content_path = os.path.join(timelines_dir, "draft_content.json")
+    with open(tl_content_path, "w", encoding="utf-8") as f:
+        json.dump(draft_content, f, ensure_ascii=False)
+
+    # Save Timelines/project.json
+    tl_proj_path = os.path.join(project_folder, "Timelines", "project.json")
+    tl_proj = {
+        "config": {
+            "color_space": 0,
+            "render_index_track_mode_on": False,
+            "use_float_render": False,
+        },
+        "create_time": int(time.time() * 1_000_000),
+        "id": project_id,
+        "main_timeline_id": project_id,
+        "timelines": [{
+            "create_time": int(time.time() * 1_000_000),
+            "id": project_id,
+            "is_marked_delete": False,
+            "name": "Timeline 01",
+            "update_time": int(time.time() * 1_000_000),
+        }],
+        "update_time": int(time.time() * 1_000_000),
+        "version": 0,
+    }
+    with open(tl_proj_path, "w", encoding="utf-8") as f:
+        json.dump(tl_proj, f, ensure_ascii=False)
+
     # Save draft_meta_info.json
     now_us = int(time.time() * 1_000_000)
     draft_meta = {

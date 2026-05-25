@@ -8,6 +8,8 @@ from tkinter import filedialog, messagebox
 
 from ui.theme import COLORS as C, FONT
 from core import create_project as cp
+from core import split_project as splitp
+from core import split_project_2 as splitp2
 
 
 class CreateProject2Tab:
@@ -38,6 +40,8 @@ class CreateProject2Tab:
 
         self._build_from_videos_tab(sub_tabs.add("Base on folder video"))
         self._build_manhwa_tab(sub_tabs.add("Manhwa"))
+        self._build_split_tab(sub_tabs.add("Split projects"))
+        self._build_split_v2_tab(sub_tabs.add("Split project 2"))
 
         # Info bar
         self.info = ctk.CTkLabel(
@@ -469,4 +473,243 @@ class CreateProject2Tab:
         root.after(0, lambda: self.app.status_var.set(f"  {summary}"))
 
         if r.created > 0:
+            root.after(0, self.app._load_projects)
+
+    # ── Sub-tab: Split projects ────────────────────────────────────
+    def _build_split_tab(self, parent):
+        f = ctk.CTkFrame(parent, fg_color="transparent")
+        f.pack(fill="both", expand=True, padx=10, pady=8)
+
+        ctk.CTkLabel(
+            f,
+            text="Chia project lớn thành nhiều part nhỏ để CapCut render nhanh hơn. "
+                 "Tick project ở panel bên phải, đặt Max duration, rồi bấm Split. "
+                 "Cắt ở ranh giới video segment gần Max — gộp lại = gốc 100%. "
+                 "Project gốc giữ nguyên.",
+            font=("Segoe UI", 10), text_color=C["text_light"],
+            justify="left", wraplength=540,
+        ).pack(anchor="w", pady=(0, 8))
+
+        # Max duration row
+        r1 = ctk.CTkFrame(f, fg_color=C["primary_light"], corner_radius=6)
+        r1.pack(fill="x", pady=(0, 8))
+        s = ctk.CTkFrame(r1, fg_color="transparent")
+        s.pack(fill="x", padx=10, pady=8)
+        ctk.CTkLabel(s, text="Max duration:", font=FONT["small"],
+                     text_color=C["text"]).pack(side="left")
+        self.split_max_var = ctk.StringVar(value="60")
+        ctk.CTkEntry(s, textvariable=self.split_max_var, height=28, width=60,
+                     fg_color=C["card"], border_color=C["input_border"],
+                     text_color=C["text"], corner_radius=6, font=FONT["small"],
+                     justify="center"
+                     ).pack(side="left", padx=(6, 4))
+        ctk.CTkLabel(s, text="(phút)", font=FONT["small"],
+                     text_color=C["text_light"]).pack(side="left", padx=(0, 12))
+        ctk.CTkLabel(
+            s,
+            text="Dư ≤ 50% max → gộp vào part cuối. Dư > 50% max → tách part mới.",
+            font=("Segoe UI", 9), text_color=C["text_light"]
+        ).pack(side="left")
+
+        # Button
+        self.split_btn = ctk.CTkButton(
+            f, text="Split selected projects", height=36, corner_radius=8,
+            fg_color=C["primary"], hover_color=C["primary_hover"],
+            text_color=C["text_white"], font=FONT["button"],
+            command=self._on_split
+        )
+        self.split_btn.pack(fill="x")
+
+    def _on_split(self):
+        try:
+            max_min = float(self.split_max_var.get().strip() or 0)
+            if max_min <= 0:
+                raise ValueError
+        except ValueError:
+            self._set_info("Max duration không hợp lệ!", C["red_light"], C["red"])
+            return
+
+        selected = self.app.project_list.get_selected()
+        if not selected:
+            self._set_info("Chưa tick project nào ở panel phải!", C["red_light"], C["red"])
+            return
+
+        capcut_path = self.app.capcut_path.get().strip()
+        if not capcut_path or not os.path.isdir(capcut_path):
+            self._set_info("CapCut path chưa cấu hình!", C["red_light"], C["red"])
+            return
+
+        names = [d.get("draft_name", "?") for _, d in selected]
+        confirm = messagebox.askokcancel(
+            "Split projects",
+            f"Split {len(selected)} project(s) với max {max_min:.0f} phút?\n\n"
+            f"Projects:\n  {chr(10).join('• ' + n for n in names[:5])}"
+            f"{'  ...' if len(names) > 5 else ''}\n\n"
+            "Project gốc giữ nguyên. Parts đã tồn tại sẽ skip.\nThoát CapCut trước.\nOK?"
+        )
+        if not confirm:
+            return
+
+        self.split_btn.configure(state="disabled", text="Đang split...")
+        self._set_info(f"Đang split {len(selected)} project...",
+                       C["primary_light"], C["primary"])
+        threading.Thread(
+            target=self._run_split,
+            args=([d for _, d in selected], capcut_path, max_min),
+            daemon=True,
+        ).start()
+
+    def _run_split(self, drafts, capcut_path, max_min):
+        root = self.app.root
+
+        def cb(msg):
+            root.after(0, self._append_log, msg)
+
+        try:
+            r = splitp.batch_split_projects(
+                drafts=drafts,
+                capcut_path=capcut_path,
+                max_minutes=max_min,
+                callback=cb,
+            )
+        except Exception as e:
+            import traceback
+            cb(f"[EXCEPTION] {traceback.format_exc()}")
+            r = splitp.BatchSplitResult()
+
+        summary = (f"Split: {r.split_ok}/{r.total} projects → "
+                   f"{r.parts_total} parts, {len(r.skipped)} skipped")
+        cb(f"══ {summary} ══")
+
+        if r.split_ok > 0 and not r.skipped:
+            bg, fg = C["green_light"], C["green"]
+        elif r.split_ok == 0:
+            bg, fg = C["red_light"], C["red"]
+        else:
+            bg, fg = C["primary_light"], C["primary"]
+        root.after(0, self._set_info, summary, bg, fg)
+        root.after(0, lambda: self.split_btn.configure(
+            state="normal", text="Split selected projects"))
+        root.after(0, lambda: self.app.status_var.set(f"  {summary}"))
+
+        if r.split_ok > 0:
+            root.after(0, self.app._load_projects)
+
+    # ── Sub-tab: Split project 2 (audio = 1 segment) ───────────────
+    def _build_split_v2_tab(self, parent):
+        f = ctk.CTkFrame(parent, fg_color="transparent")
+        f.pack(fill="both", expand=True, padx=10, pady=8)
+
+        ctk.CTkLabel(
+            f,
+            text="Split cho project có audio track = 1 segment duy nhất (ví dụ project Manhwa). "
+                 "Cắt chính xác ở ranh giới video segment, audio dùng source_timerange offset "
+                 "→ ghép lại = gốc 100%. Project gốc giữ nguyên.",
+            font=("Segoe UI", 10), text_color=C["text_light"],
+            justify="left", wraplength=540,
+        ).pack(anchor="w", pady=(0, 8))
+
+        # Max duration row
+        r1 = ctk.CTkFrame(f, fg_color=C["primary_light"], corner_radius=6)
+        r1.pack(fill="x", pady=(0, 8))
+        s = ctk.CTkFrame(r1, fg_color="transparent")
+        s.pack(fill="x", padx=10, pady=8)
+        ctk.CTkLabel(s, text="Max duration:", font=FONT["small"],
+                     text_color=C["text"]).pack(side="left")
+        self.split_v2_max_var = ctk.StringVar(value="60")
+        ctk.CTkEntry(s, textvariable=self.split_v2_max_var, height=28, width=60,
+                     fg_color=C["card"], border_color=C["input_border"],
+                     text_color=C["text"], corner_radius=6, font=FONT["small"],
+                     justify="center"
+                     ).pack(side="left", padx=(6, 4))
+        ctk.CTkLabel(s, text="(phút)", font=FONT["small"],
+                     text_color=C["text_light"]).pack(side="left", padx=(0, 12))
+        ctk.CTkLabel(
+            s,
+            text="Dư ≤ 50% max → gộp vào part cuối. Dư > 50% max → tách part mới.",
+            font=("Segoe UI", 9), text_color=C["text_light"]
+        ).pack(side="left")
+
+        self.split_v2_btn = ctk.CTkButton(
+            f, text="Split (audio 1 file)", height=36, corner_radius=8,
+            fg_color=C["accent"], hover_color="#7c3aed",
+            text_color=C["text_white"], font=FONT["button"],
+            command=self._on_split_v2
+        )
+        self.split_v2_btn.pack(fill="x")
+
+    def _on_split_v2(self):
+        try:
+            max_min = float(self.split_v2_max_var.get().strip() or 0)
+            if max_min <= 0:
+                raise ValueError
+        except ValueError:
+            self._set_info("Max duration không hợp lệ!", C["red_light"], C["red"])
+            return
+
+        selected = self.app.project_list.get_selected()
+        if not selected:
+            self._set_info("Chưa tick project nào ở panel phải!", C["red_light"], C["red"])
+            return
+
+        capcut_path = self.app.capcut_path.get().strip()
+        if not capcut_path or not os.path.isdir(capcut_path):
+            self._set_info("CapCut path chưa cấu hình!", C["red_light"], C["red"])
+            return
+
+        names = [d.get("draft_name", "?") for _, d in selected]
+        confirm = messagebox.askokcancel(
+            "Split project 2",
+            f"Split {len(selected)} project(s) với max {max_min:.0f} phút?\n\n"
+            f"Yêu cầu: audio track = 1 segment duy nhất.\n\n"
+            f"Projects:\n  {chr(10).join('• ' + n for n in names[:5])}"
+            f"{'  ...' if len(names) > 5 else ''}\n\n"
+            "Project gốc giữ nguyên. Parts đã tồn tại sẽ skip.\nThoát CapCut trước.\nOK?"
+        )
+        if not confirm:
+            return
+
+        self.split_v2_btn.configure(state="disabled", text="Đang split...")
+        self._set_info(f"Đang split {len(selected)} project (v2)...",
+                       C["primary_light"], C["primary"])
+        threading.Thread(
+            target=self._run_split_v2,
+            args=([d for _, d in selected], capcut_path, max_min),
+            daemon=True,
+        ).start()
+
+    def _run_split_v2(self, drafts, capcut_path, max_min):
+        root = self.app.root
+
+        def cb(msg):
+            root.after(0, self._append_log, msg)
+
+        try:
+            r = splitp2.batch_split_projects_v2(
+                drafts=drafts,
+                capcut_path=capcut_path,
+                max_minutes=max_min,
+                callback=cb,
+            )
+        except Exception as e:
+            import traceback
+            cb(f"[EXCEPTION] {traceback.format_exc()}")
+            r = splitp2.BatchSplitResult()
+
+        summary = (f"Split v2: {r.split_ok}/{r.total} projects → "
+                   f"{r.parts_total} parts, {len(r.skipped)} skipped")
+        cb(f"══ {summary} ══")
+
+        if r.split_ok > 0 and not r.skipped:
+            bg, fg = C["green_light"], C["green"]
+        elif r.split_ok == 0:
+            bg, fg = C["red_light"], C["red"]
+        else:
+            bg, fg = C["primary_light"], C["primary"]
+        root.after(0, self._set_info, summary, bg, fg)
+        root.after(0, lambda: self.split_v2_btn.configure(
+            state="normal", text="Split (audio 1 file)"))
+        root.after(0, lambda: self.app.status_var.set(f"  {summary}"))
+
+        if r.split_ok > 0:
             root.after(0, self.app._load_projects)

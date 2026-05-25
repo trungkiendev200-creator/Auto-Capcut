@@ -41,16 +41,16 @@ class CreateProjectTab:
         self.name_entry.pack(side="left", fill="x", expand=True)
 
         # Images/Videos Folder
-        r2 = ctk.CTkFrame(frame, fg_color="transparent")
-        r2.pack(fill="x", pady=(0, 6))
-        self.media_label = ctk.CTkLabel(r2, text="Images/Videos:", font=FONT["body"],
+        self.media_row = ctk.CTkFrame(frame, fg_color="transparent")
+        self.media_row.pack(fill="x", pady=(0, 6))
+        self.media_label = ctk.CTkLabel(self.media_row, text="Images/Videos:", font=FONT["body"],
                       text_color=C["text"], width=130, anchor="w")
         self.media_label.pack(side="left")
         self.media_var = tk.StringVar()
-        ctk.CTkEntry(r2, textvariable=self.media_var, height=32,
+        ctk.CTkEntry(self.media_row, textvariable=self.media_var, height=32,
                       fg_color=C["input_bg"], border_color=C["input_border"],
                       text_color=C["text"], corner_radius=8).pack(side="left", fill="x", expand=True, padx=(0, 6))
-        ctk.CTkButton(r2, text="Select", width=65, height=32, corner_radius=8,
+        ctk.CTkButton(self.media_row, text="Select", width=65, height=32, corner_radius=8,
                        fg_color=C["primary_light"], text_color=C["primary"],
                        hover_color=C["primary_muted"], font=FONT["small"],
                        command=self._browse_media).pack(side="left")
@@ -133,24 +133,7 @@ class CreateProjectTab:
             self.audio_label.configure(text="Thư mục CHA audio:")
             self.create_btn.configure(text="Create All Projects")
         else:
-            # Re-show name row (insert after batch checkbox)
-            self.name_row.pack(fill="x", pady=(0, 6), after=self.batch_var._variable)
-            # Workaround: just re-pack
-            self.name_row.pack_forget()
-            children = self.create_btn.master.winfo_children()
-            # Pack name_row as second child
-            for i, child in enumerate(children):
-                child.pack_forget()
-            for i, child in enumerate(children):
-                if i == 0:  # batch checkbox
-                    child.pack(anchor="w", pady=(0, 8))
-                elif child == self.name_row:
-                    child.pack(fill="x", pady=(0, 6))
-                elif child == self.create_btn:
-                    child.pack(fill="x", pady=(4, 0))
-                else:
-                    child.pack(fill="x", pady=(0, 6))
-
+            self.name_row.pack(fill="x", pady=(0, 6), before=self.media_row)
             self.media_label.configure(text="Images/Videos:")
             self.audio_label.configure(text="Audio (Optional):")
             self.create_btn.configure(text="Create Project")

@@ -18,7 +18,9 @@ class AnimationTab:
         self.filtered: list[alib.AnimationInfo] = []
         self.selected_rids: set[str] = set()  # Giữ selection xuyên suốt các tab
         self._build(parent)
-        threading.Thread(target=self._load_library_bg, daemon=True).start()
+        # Defer until mainloop running — bg thread's root.after() needs it
+        self.app.root.after(100, lambda: threading.Thread(
+            target=self._load_library_bg, daemon=True).start())
 
     def _build(self, parent):
         frame = ctk.CTkFrame(parent, fg_color="transparent")

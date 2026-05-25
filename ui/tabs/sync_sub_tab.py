@@ -6,7 +6,7 @@ import customtkinter as ctk
 from tkinter import filedialog, messagebox
 
 from ui.theme import COLORS as C, FONT
-from core import sync_sub_engine, capcut
+from core import sync_sub_engine, capcut, track_image_engine, hook_intro_engine
 
 
 class SyncSubTab:
@@ -26,6 +26,8 @@ class SyncSubTab:
         self.pic_folder_var = ctk.StringVar()
         self.promax_parent_var = ctk.StringVar()
         self.promax_bg_var = ctk.StringVar()
+        self.p17_parent_var = ctk.StringVar()
+        self.p17_bg_var = ctk.StringVar()
         self._unlocked = False
         self._parent = parent
         self._build_lock_screen(parent)
@@ -104,6 +106,8 @@ class SyncSubTab:
         self._build_sync_tab(sub_tabs.add("Sync Media"))
         self._build_picture_law_tab(sub_tabs.add("Insert Picture"))
         self._build_promax_tab(sub_tabs.add("PROMAX"))
+        self._build_17promax_tab(sub_tabs.add("17 PROMAX"))
+        self._build_handle_track_image_tab(sub_tabs.add("Handle track image"))
 
         # ── Info bar ──
         self.info = ctk.CTkLabel(
@@ -1097,6 +1101,437 @@ class SyncSubTab:
         root.after(0, self._set_info, summary, color_bg, color_fg)
         root.after(0, lambda: self.promax_btn.configure(
             state="normal", text="Run PROMAX"))
+
+    # ── Sub-tab: 17 PROMAX ────────────────────────────────────────
+    def _build_17promax_tab(self, parent):
+        import tkinter as tk
+
+        f = ctk.CTkFrame(parent, fg_color="transparent")
+        f.pack(fill="both", expand=True, padx=10, pady=6)
+
+        # Parent folder
+        r1 = ctk.CTkFrame(f, fg_color="transparent")
+        r1.pack(fill="x", pady=(0, 4))
+        ctk.CTkLabel(r1, text="Thư mục cha:", width=95, anchor="w",
+                     font=FONT["small"], text_color=C["text_light"]).pack(side="left")
+        ctk.CTkEntry(r1, textvariable=self.p17_parent_var, height=28,
+                     fg_color=C["input_bg"], border_color=C["input_border"],
+                     text_color=C["text"], corner_radius=6, font=FONT["small"]
+                     ).pack(side="left", fill="x", expand=True, padx=(4, 4))
+        ctk.CTkButton(r1, text="...", width=28, height=28, corner_radius=6,
+                      fg_color=C["tab_bg"], text_color=C["text"],
+                      hover_color=C["primary_muted"], border_width=1,
+                      border_color=C["input_border"], font=FONT["small"],
+                      command=lambda: self._browse_dir(self.p17_parent_var)
+                      ).pack(side="left")
+
+        # BG video
+        r2 = ctk.CTkFrame(f, fg_color="transparent")
+        r2.pack(fill="x", pady=(0, 4))
+        ctk.CTkLabel(r2, text="Video nền:", width=95, anchor="w",
+                     font=FONT["small"], text_color=C["text_light"]).pack(side="left")
+        ctk.CTkEntry(r2, textvariable=self.p17_bg_var, height=28,
+                     fg_color=C["input_bg"], border_color=C["input_border"],
+                     text_color=C["text"], corner_radius=6, font=FONT["small"]
+                     ).pack(side="left", fill="x", expand=True, padx=(4, 4))
+        ctk.CTkButton(r2, text="...", width=28, height=28, corner_radius=6,
+                      fg_color=C["tab_bg"], text_color=C["text"],
+                      hover_color=C["primary_muted"], border_width=1,
+                      border_color=C["input_border"], font=FONT["small"],
+                      command=lambda: self._browse_file_to(
+                          self.p17_bg_var, "Chọn video nền",
+                          [("Video", "*.mp4 *.mov *.avi *.mkv"), ("All", "*.*")])
+                      ).pack(side="left")
+
+        # Speed + animation
+        r3 = ctk.CTkFrame(f, fg_color="transparent")
+        r3.pack(fill="x", pady=(0, 4))
+        ctk.CTkLabel(r3, text="Sync Speed:", width=95, anchor="w",
+                     font=FONT["small"], text_color=C["text_light"]).pack(side="left")
+        self.p17_speed_var = ctk.StringVar(value="1.3")
+        ctk.CTkEntry(r3, textvariable=self.p17_speed_var, height=28, width=80,
+                     fg_color=C["input_bg"], border_color=C["input_border"],
+                     text_color=C["text"], corner_radius=6, font=FONT["small"]
+                     ).pack(side="left", padx=(4, 0))
+        self.p17_anim_var = tk.BooleanVar(value=True)
+        ctk.CTkCheckBox(
+            r3, text="Animation cho ảnh", variable=self.p17_anim_var,
+            font=FONT["small"], text_color=C["text_light"],
+            checkbox_width=16, checkbox_height=16,
+            fg_color=C["primary"], hover_color=C["primary_hover"],
+        ).pack(side="left", padx=(12, 0))
+
+        info_text = (
+            "Giống PROMAX nhưng MỖI subfolder thêm:\n"
+            "  • 4-hook.txt  (mỗi dòng = 1 hook range, vd 13-15)\n"
+            "  • intro.mp3  (file audio intro)\n"
+            "  • text intro.txt  (tùy chọn — text intro, track riêng trùng vị trí audio intro)\n"
+            "Quy trình: chạy PROMAX → snapshot hook → prepend [hook + filler + "
+            "intro.mp3 + intro_text] vào đầu timeline."
+        )
+        ctk.CTkLabel(f, text=info_text, font=("Segoe UI", 10),
+                     text_color=C["text_light"], justify="left", wraplength=520
+                     ).pack(anchor="w", pady=(4, 6))
+
+        self.p17_btn = ctk.CTkButton(
+            f, text="Run 17 PROMAX", height=36, corner_radius=8,
+            fg_color=C["accent"], hover_color="#7c3aed",
+            text_color=C["text_white"], font=FONT["button"],
+            command=self._on_run_17promax
+        )
+        self.p17_btn.pack(fill="x")
+
+    def _browse_file_to(self, var, title, filetypes):
+        path = filedialog.askopenfilename(title=title, filetypes=filetypes)
+        if path:
+            var.set(path)
+
+    def _validate_17promax_data(self, selected, parent_folder):
+        # Reuse promax validation + thêm 4-hook.txt + intro.mp3
+        errors = self._validate_promax_data(selected, parent_folder)
+        for _, draft in selected:
+            name = draft.get("draft_name", "?")
+            sub = os.path.join(parent_folder, name)
+            if not os.path.isdir(sub):
+                continue
+            hook_file = os.path.join(sub, "4-hook.txt")
+            intro_file = os.path.join(sub, "intro.mp3")
+            if not os.path.isfile(hook_file):
+                errors.append(f"[{name}] Thiếu: 4-hook.txt")
+            else:
+                try:
+                    if not self._read_text(hook_file).strip():
+                        errors.append(f"[{name}] File trống: 4-hook.txt")
+                except Exception as e:
+                    errors.append(f"[{name}] Không đọc được 4-hook.txt: {e}")
+            if not os.path.isfile(intro_file):
+                errors.append(f"[{name}] Thiếu: intro.mp3")
+        return errors
+
+    def _on_run_17promax(self):
+        try:
+            selected = self.app.project_list.get_selected()
+            if not selected:
+                self._set_info("Chưa chọn project nào!", C["red_light"], C["red"])
+                return
+
+            parent_folder = self.p17_parent_var.get().strip()
+            bg_video = self.p17_bg_var.get().strip()
+            if not parent_folder or not os.path.isdir(parent_folder):
+                self._set_info("Thư mục cha không hợp lệ!", C["red_light"], C["red"])
+                return
+            if not bg_video or not os.path.isfile(bg_video):
+                self._set_info("Video nền không hợp lệ!", C["red_light"], C["red"])
+                return
+
+            try:
+                speed = float(self.p17_speed_var.get())
+                if speed <= 0:
+                    raise ValueError
+            except ValueError:
+                self._set_info("Speed không hợp lệ!", C["red_light"], C["red"])
+                return
+
+            add_anim = self.p17_anim_var.get()
+
+            errors = self._validate_17promax_data(selected, parent_folder)
+            if errors:
+                self._append_log("[17 PROMAX VALIDATE] Data không hợp lệ:")
+                for e in errors:
+                    self._append_log(f"  - {e}")
+                self._set_info(f"Validate fail: {len(errors)} lỗi",
+                               C["red_light"], C["red"])
+                messagebox.showerror(
+                    "17 PROMAX — Validate Fail",
+                    "Kiểm tra dữ liệu thất bại. Chưa chạy gì cả.\n\n" + "\n".join(errors)
+                )
+                return
+
+            names = [d.get("draft_name", "?") for _, d in selected]
+            preview = ", ".join(names[:5]) + ("..." if len(names) > 5 else "")
+            confirm = messagebox.askokcancel(
+                "17 PROMAX",
+                f"Validate OK. Chạy {len(selected)} project:\n{preview}\n\n"
+                f"Speed: {speed}x | Animation: {'ON' if add_anim else 'OFF'}\n\n"
+                "Thoát CapCut trước khi tiếp tục.\nOK?"
+            )
+            if not confirm:
+                return
+
+            self.p17_btn.configure(state="disabled", text="Đang chạy...")
+            self._set_info(f"17 PROMAX: {len(selected)} projects...",
+                           C["primary_light"], C["primary"])
+
+            threading.Thread(
+                target=self._run_17promax,
+                args=(selected, parent_folder, bg_video, speed, add_anim),
+                daemon=True,
+            ).start()
+        except Exception as e:
+            import traceback
+            self._append_log(f"[17 PROMAX] EXCEPTION: {traceback.format_exc()}")
+            self._set_info(f"Error: {e}", C["red_light"], C["red"])
+
+    def _run_17promax(self, selected, parent_folder, bg_video, speed, add_anim):
+        root = self.app.root
+        _log = self._make_log_fn()
+
+        ok_count = 0
+        fail_count = 0
+        total = len(selected)
+
+        for i, (idx, draft) in enumerate(selected, start=1):
+            name = draft.get("draft_name", "?")
+            draft_path = self._resolve_path(draft)
+
+            _log(f"── [{i}/{total}] 17 PROMAX: {name} ──")
+            root.after(0, self.app.project_list.set_status, idx, "...", C["primary"])
+            root.after(0, self._set_info,
+                       f"[{i}/{total}] {name}...",
+                       C["primary_light"], C["primary"])
+
+            if not draft_path:
+                _log(f"  FAIL: draft folder not found")
+                root.after(0, self.app.project_list.set_status, idx, "Fail", C["red"])
+                fail_count += 1
+                continue
+
+            sub_folder = os.path.join(parent_folder, name)
+            narration_folder = os.path.join(sub_folder, "narration")
+            picture_folder = os.path.join(sub_folder, "law picture")
+            cut_file = os.path.join(sub_folder, "1-insert-radio.txt")
+            delete_file = os.path.join(sub_folder, "2-delete-narration.txt")
+            pic_file = os.path.join(sub_folder, "3-insert-law-picture.txt")
+            hook_file = os.path.join(sub_folder, "4-hook.txt")
+            intro_file = os.path.join(sub_folder, "intro.mp3")
+            intro_txt_file = os.path.join(sub_folder, "text intro.txt")
+
+            try:
+                cut_text = self._read_text(cut_file)
+                delete_text = self._read_text(delete_file)
+                pic_text = self._read_text(pic_file)
+                hook_text = self._read_text(hook_file)
+                intro_text = self._read_text(intro_txt_file) if os.path.isfile(intro_txt_file) else ""
+            except Exception as e:
+                _log(f"  FAIL: read txt error: {e}")
+                root.after(0, self.app.project_list.set_status, idx, "Fail", C["red"])
+                fail_count += 1
+                continue
+
+            # ── PRE: snapshot hook ──
+            _log(f"  [0/5] Snapshot hook")
+            hook_ranges = hook_intro_engine.parse_hook_input(hook_text)
+            if not hook_ranges:
+                _log(f"    FAIL: 4-hook.txt rỗng hoặc không parse được")
+                root.after(0, self.app.project_list.set_status, idx, "Fail", C["red"])
+                fail_count += 1
+                continue
+            try:
+                snap = hook_intro_engine.snapshot_hook(draft_path, hook_ranges)
+                _log(f"    OK: {len(hook_ranges)} hook range(s), tổng "
+                     f"{sum(r[1] for r in snap.hook_ranges)/1_000_000:.1f}s")
+            except Exception as e:
+                _log(f"    FAIL: snapshot: {e}")
+                root.after(0, self.app.project_list.set_status, idx, "Fail", C["red"])
+                fail_count += 1
+                continue
+
+            project_ok = True
+
+            # ── PROMAX 4 steps ──
+            _log(f"  [1/5] Cut & Import Audio")
+            try:
+                r = sync_sub_engine.cut_and_import_audio(
+                    draft_path, narration_folder, bg_video, cut_text,
+                    backup=True, log_fn=_log
+                )
+                if not r.success:
+                    _log(f"    FAIL: {r.message}")
+                    project_ok = False
+                else:
+                    _log(f"    OK: {r.message}")
+            except Exception as e:
+                import traceback
+                _log(f"    EXCEPTION: {traceback.format_exc()}")
+                project_ok = False
+
+            if project_ok:
+                if delete_text.strip():
+                    _log(f"  [2/5] Xóa SRT")
+                    try:
+                        r = sync_sub_engine.delete_srt_and_cut(
+                            draft_path, delete_text, backup=True, log_fn=_log
+                        )
+                        if not r.success:
+                            _log(f"    FAIL: {r.message}")
+                            project_ok = False
+                        else:
+                            _log(f"    OK: {r.message}")
+                    except Exception as e:
+                        import traceback
+                        _log(f"    EXCEPTION: {traceback.format_exc()}")
+                        project_ok = False
+                else:
+                    _log(f"  [2/5] Xóa SRT: file trống, bỏ qua")
+
+            if project_ok:
+                _log(f"  [3/5] Sync Media @{speed}x")
+                try:
+                    r = sync_sub_engine.sync_media_sub(
+                        draft_path, speed=speed, backup=True, log_fn=_log
+                    )
+                    if not r.success:
+                        _log(f"    FAIL: {r.message}")
+                        project_ok = False
+                    else:
+                        _log(f"    OK: {r.message}")
+                except Exception as e:
+                    import traceback
+                    _log(f"    EXCEPTION: {traceback.format_exc()}")
+                    project_ok = False
+
+            if project_ok:
+                _log(f"  [4/5] Insert Picture")
+                try:
+                    r = sync_sub_engine.insert_picture_law(
+                        draft_path, picture_folder, pic_text,
+                        add_animation=add_anim, backup=True, log_fn=_log
+                    )
+                    if not r.success:
+                        _log(f"    FAIL: {r.message}")
+                        project_ok = False
+                    else:
+                        _log(f"    OK: {r.message}")
+                except Exception as e:
+                    import traceback
+                    _log(f"    EXCEPTION: {traceback.format_exc()}")
+                    project_ok = False
+
+            # ── POST: prepend hook + intro ──
+            if project_ok:
+                _log(f"  [5/5] Prepend hook + intro")
+                try:
+                    r = hook_intro_engine.prepend_hook_and_intro(
+                        draft_path, snap, intro_file, intro_text=intro_text
+                    )
+                    if not r.success:
+                        _log(f"    FAIL: {r.message}")
+                        project_ok = False
+                    else:
+                        _log(f"    OK: {r.message}")
+                except Exception as e:
+                    import traceback
+                    _log(f"    EXCEPTION: {traceback.format_exc()}")
+                    project_ok = False
+
+            if project_ok:
+                ok_count += 1
+                root.after(0, self.app.project_list.set_status, idx, "Done", C["green"])
+                _log(f"  ✓ DONE: {name}")
+            else:
+                fail_count += 1
+                root.after(0, self.app.project_list.set_status, idx, "Fail", C["red"])
+                _log(f"  ✗ FAIL: {name}")
+
+        summary = f"17 PROMAX xong: {ok_count}/{total} OK, {fail_count} fail"
+        _log(f"══ {summary} ══")
+        color_bg = C["green_light"] if fail_count == 0 else C["red_light"]
+        color_fg = C["green"] if fail_count == 0 else C["red"]
+        root.after(0, self._set_info, summary, color_bg, color_fg)
+        root.after(0, lambda: self.p17_btn.configure(
+            state="normal", text="Run 17 PROMAX"))
+
+    # ── Sub-tab: Handle track image ────────────────────────────────
+    def _build_handle_track_image_tab(self, parent):
+        f = ctk.CTkFrame(parent, fg_color="transparent")
+        f.pack(fill="both", expand=True, padx=10, pady=6)
+
+        info_text = (
+            "Chọn 1+ project bên phải. Tool sửa effect (Blur...) từ "
+            "apply_target_type=2 (global) → 1 (main track only) → effect chỉ "
+            "apply lên video chính, KHÔNG che ảnh overlay.\n"
+            "Thoát CapCut trước khi chạy."
+        )
+        ctk.CTkLabel(f, text=info_text, font=("Segoe UI", 10),
+                     text_color=C["text_light"], justify="left", wraplength=560
+                     ).pack(anchor="w", pady=(4, 8))
+
+        self.hti_btn = ctk.CTkButton(
+            f, text="Run — Fix effect không che ảnh", height=36, corner_radius=8,
+            fg_color=C["primary"], hover_color=C["primary_hover"],
+            text_color=C["text_white"], font=FONT["button"],
+            command=self._on_run_handle_track_image
+        )
+        self.hti_btn.pack(fill="x")
+
+    def _on_run_handle_track_image(self):
+        selected = self.app.project_list.get_selected()
+        if not selected:
+            self._set_info("Chưa chọn project nào!", C["red_light"], C["red"])
+            return
+
+        names = [d.get("draft_name", "?") for _, d in selected]
+        preview = ", ".join(names[:5]) + ("..." if len(names) > 5 else "")
+        confirm = messagebox.askokcancel(
+            "Handle track image",
+            f"Sẽ xử lý {len(selected)} project:\n{preview}\n\n"
+            "Tool đổi apply_target_type của effect 2→1 (effect chỉ apply trên main track).\n"
+            "Thoát CapCut trước khi tiếp tục.\nOK?"
+        )
+        if not confirm:
+            return
+
+        self.hti_btn.configure(state="disabled", text="Đang chạy...")
+        self._set_info(f"Handle track image: {len(selected)} project...",
+                       C["primary_light"], C["primary"])
+
+        threading.Thread(
+            target=self._run_handle_track_image,
+            args=(selected,),
+            daemon=True
+        ).start()
+
+    def _run_handle_track_image(self, selected):
+        root = self.app.root
+        _log = self._make_log_fn()
+
+        ok = skip = fail = 0
+        total = len(selected)
+
+        for i, (idx, draft) in enumerate(selected, start=1):
+            name = draft.get("draft_name", "?")
+            draft_path = self._resolve_path(draft)
+
+            _log(f"── [{i}/{total}] {name} ──")
+            root.after(0, self.app.project_list.set_status, idx, "...", C["primary"])
+
+            if not draft_path:
+                _log(f"  FAIL: draft folder not found")
+                root.after(0, self.app.project_list.set_status, idx, "Fail", C["red"])
+                fail += 1
+                continue
+
+            r = track_image_engine.fix_image_overlay(draft_path)
+            if r.success and r.effects_changed > 0:
+                ok += 1
+                _log(f"  OK: {r.message}")
+                root.after(0, self.app.project_list.set_status, idx, "OK", C["green"])
+            elif r.success:
+                skip += 1
+                _log(f"  SKIP: {r.message}")
+                root.after(0, self.app.project_list.set_status, idx, "Skip", C["text_light"])
+            else:
+                fail += 1
+                _log(f"  FAIL: {r.message}")
+                root.after(0, self.app.project_list.set_status, idx, "Fail", C["red"])
+
+        summary = f"Handle track image xong: {ok}/{total} OK, {skip} skip, {fail} fail"
+        _log(f"══ {summary} ══")
+        color_bg = C["green_light"] if fail == 0 else C["red_light"]
+        color_fg = C["green"] if fail == 0 else C["red"]
+        root.after(0, self._set_info, summary, color_bg, color_fg)
+        root.after(0, lambda: self.hti_btn.configure(
+            state="normal", text="Run — Fix effect không che ảnh"))
 
     @staticmethod
     def _read_text(path: str) -> str:

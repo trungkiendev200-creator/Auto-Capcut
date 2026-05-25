@@ -181,9 +181,16 @@ def get_capcut_exe():
 def kill_capcut(cb=None):
     if cb:
         cb("Kill CapCut...")
-    os.system('taskkill /F /IM CapCut.exe >nul 2>&1')
-    os.system('taskkill /F /IM VEDetector.exe >nul 2>&1')
-    os.system('taskkill /F /IM VEHelper.exe >nul 2>&1')
+    CREATE_NO_WINDOW = 0x08000000
+    for name in ("CapCut.exe", "VEDetector.exe", "VEHelper.exe"):
+        try:
+            subprocess.run(
+                ["taskkill", "/F", "/IM", name],
+                capture_output=True, timeout=5,
+                creationflags=CREATE_NO_WINDOW,
+            )
+        except Exception:
+            pass
     time.sleep(3)
 
 

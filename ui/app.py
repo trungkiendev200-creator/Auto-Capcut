@@ -28,7 +28,7 @@ class AutoCapcut:
 
         self.root = ctk.CTk()
         self.root.title("Auto CapCut")
-        self.root.geometry("1250x720")
+        self.root.geometry("1400x720")
         self.root.resizable(False, False)
         self.root.configure(fg_color=C["bg"])
 
@@ -74,16 +74,16 @@ class AutoCapcut:
         tabview.grid(row=1, column=0, sticky="nsew")
 
         self.create_tab = CreateProjectTab(tabview.add("Create Project"), app=self)
-        self.create_tab_2 = CreateProject2Tab(tabview.add("Create Project 2"), app=self)
         self.sync_tab = SyncTab(tabview.add("Sync Audio"), app=self)
-        self.cut_percent_tab = CutPercentTab(tabview.add("Cut %"), app=self)
-        self.sync_sub_tab = SyncSubTab(tabview.add("VIP5AE"), app=self)
         self.keyframe_tab = KeyFrameTab(tabview.add("Key Frame"), app=self)
         self.animation_tab = AnimationTab(tabview.add("Animation"), app=self)
         self.transition_tab = TransitionTab(tabview.add("Transitions"), app=self)
         self.effect_tab = EffectTab(tabview.add("Effect"), app=self)
-
         self.caption_tab = CaptionTab(tabview.add("Caption"), app=self)
+
+        self.create_tab_2 = CreateProject2Tab(tabview.add("Create Project 2"), app=self)
+        self.cut_percent_tab = CutPercentTab(tabview.add("Cut %"), app=self)
+        self.sync_sub_tab = SyncSubTab(tabview.add("VIP5AE"), app=self)
 
         log_tab = tabview.add("Log")
         self.log_box = ctk.CTkTextbox(

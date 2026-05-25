@@ -60,11 +60,13 @@ def save_draft_content(draft_path: str, data: dict) -> None:
     import time as _time
 
     # Kill tất cả CapCut processes trước khi ghi
+    CREATE_NO_WINDOW = 0x08000000
     for proc_name in ["CapCut.exe", "CapCutLoader.exe", "CapCut_Service.exe"]:
         try:
             subprocess.run(
                 ["taskkill", "/F", "/IM", proc_name],
-                capture_output=True, timeout=5
+                capture_output=True, timeout=5,
+                creationflags=CREATE_NO_WINDOW,
             )
         except Exception:
             pass

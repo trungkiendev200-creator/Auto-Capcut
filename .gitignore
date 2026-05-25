@@ -12,3 +12,4 @@ assets/debug_*
 assets/capcut_*
 assets/buttons/
 test_*.py
+.claude/
