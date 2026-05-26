@@ -93,9 +93,51 @@ def _get_media_info(filepath: str) -> dict:
         return {"type": "video", "width": 1920, "height": 1080, "duration": vid_dur, "name": name, "has_audio": True}
 
 
+def _read_wav_duration_us(filepath: str) -> int | None:
+    """Parse WAV chunks trực tiếp để lấy duration. Trả về microseconds.
+
+    Cần thiết vì mutagen FAIL trên WAV format=3 (IEEE float) — format chuẩn của
+    output TTS engines như XTTS / Bark / ElevenLabs.
+    """
+    import struct
+    try:
+        with open(filepath, "rb") as f:
+            riff = f.read(12)
+            if len(riff) < 12 or riff[:4] != b"RIFF" or riff[8:12] != b"WAVE":
+                return None
+            byterate = None
+            data_size = None
+            while True:
+                hdr = f.read(8)
+                if len(hdr) < 8:
+                    break
+                cid, sz = struct.unpack("<4sI", hdr)
+                if cid == b"fmt ":
+                    fmt_data = f.read(sz)
+                    if len(fmt_data) < 16:
+                        return None
+                    byterate = struct.unpack("<I", fmt_data[8:12])[0]
+                elif cid == b"data":
+                    data_size = sz
+                    break
+                else:
+                    f.seek(sz, 1)
+            if byterate and data_size:
+                return int(data_size / byterate * 1_000_000)
+    except Exception:
+        return None
+    return None
+
+
 def _get_audio_duration(filepath: str) -> int:
     """Đọc duration audio chính xác (microseconds)."""
-    # Method 1: mutagen (chính xác)
+    # Method 0: WAV header parser (authoritative cho mọi format WAV)
+    if filepath.lower().endswith(".wav"):
+        dur = _read_wav_duration_us(filepath)
+        if dur is not None and dur > 0:
+            return dur
+
+    # Method 1: mutagen MP3
     try:
         from mutagen.mp3 import MP3
         audio = MP3(filepath)
@@ -112,7 +154,8 @@ def _get_audio_duration(filepath: str) -> int:
     except Exception:
         pass
 
-    # Method 3: fallback estimate từ file size (~96kbps)
+    # Method 3: fallback estimate từ file size (~96kbps) — chỉ dùng khi mọi
+    # cách khác fail. Có thể sai đáng kể với bitrate cao.
     try:
         size = os.path.getsize(filepath)
         return int((size / (96 * 1024 / 8)) * 1_000_000)
