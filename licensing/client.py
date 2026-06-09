@@ -9,7 +9,7 @@ from datetime import datetime, timedelta
 from licensing.fingerprint import get_hardware_id
 from licensing import storage
 
-API_URL = "https://script.google.com/macros/s/AKfycbwHjQYei5vgWLft5jfiZAJ1trDCBSIyqbFv5SqwRWzOLZ-Rr3pQgf3MqA8fdSv2hxfC8g/exec"
+API_URL = "https://script.google.com/macros/s/AKfycbxom1--vyYqfX557R6Q9eIeExhHvQXkMVXQN3Hx4r6--m75fHaIuXW7ekpW0td1G_kNjQ/exec"
 
 OFFLINE_GRACE_DAYS = 7
 
