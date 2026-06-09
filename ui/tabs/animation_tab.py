@@ -155,7 +155,7 @@ class AnimationTab:
 
     def _set_library(self, lib):
         self.library = lib
-        self.app.status_var.set("  XS-Auto-Capcut")
+        self.app.status_var.set("  Auto-Capcut")
         tab = self.tab_var.get()
         self.filtered = [a for a in self.library if a.category == tab]
         self._render_list()

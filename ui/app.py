@@ -34,7 +34,7 @@ class AutoCapcut:
 
         self.capcut_path = tk.StringVar()
         self.export_path = tk.StringVar()
-        self.status_var = tk.StringVar(value="XS-Auto-Capcut")
+        self.status_var = tk.StringVar(value="Auto-Capcut")
 
         self._build_ui()
         self._load_settings()
