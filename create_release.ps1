@@ -1,4 +1,8 @@
-# Auto-create GitHub Release v1.18.1 with AutoCapCut.exe
+param(
+    [string]$Repo = "trungkiendev200-creator/Auto-Capcut"
+)
+
+# Auto-create GitHub Release with AutoCapCut.exe
 $ErrorActionPreference = "Stop"
 
 # Extract token from Git Credential Manager.
@@ -17,8 +21,8 @@ foreach ($line in $cred) {
 if (-not $token) { throw "Could not extract GitHub token from credential manager" }
 Write-Host "Token extracted (length=$($token.Length))"
 
-$repo = "trungkiendev200-creator/Auto-Capcut"
-$tag = "v1.18.1"
+$repo = $Repo
+$tag = "v1.19.0"
 $exePath = "dist\AutoCapCut.exe"
 
 if (-not (Test-Path $exePath)) { throw "Missing $exePath" }
@@ -31,18 +35,14 @@ $headers = @{
 }
 
 $bodyText = @"
-## Bug fix
-- Fix audio duration sai ~8x voi file WAV IEEE float 32-bit (output cua TTS engines nhu XTTS / Bark / ElevenLabs).
-- ``_get_audio_duration()`` gio doc thang WAV chunks (RIFF/fmt/data) truoc khi roi vao mutagen fallback.
-
-## Tac dong
-- Truoc: 253 file voice TTS -> timeline 348 phut (sai).
-- Sau:   253 file voice TTS -> timeline 44.5 phut (dung).
+## Cap nhat
+- Doi label footer thanh Auto-Capcut.
+- Ban chuyen tiep: tu phien ban nay app se tu dong cap nhat tu repo moi.
 "@
 
 $payload = @{
     tag_name = $tag
-    name = "v1.18.1 - Fix audio duration cho WAV IEEE float"
+    name = "v1.19.0 - Auto-Capcut"
     body = $bodyText
     draft = $false
     prerelease = $false
