@@ -4,8 +4,7 @@ import json
 import urllib.request
 from version import __version__
 
-# TODO: đổi thành repo thật
-GITHUB_REPO = "docs8nguyenphuoc-svg/Auto-Capcut"
+GITHUB_REPO = "trungkiendev200-creator/Auto-Capcut"
 API_URL = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
 
 
