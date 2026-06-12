@@ -286,3 +286,16 @@ class CreateProjectTab:
         self.app.root.after(0, self.app._load_projects)
         self.app.root.after(0, lambda: self.create_btn.configure(
             state="normal", text="Create All Projects"))
+
+        # Không tạo được project nào → báo popup rõ ràng (lỗi input)
+        if result.created == 0:
+            detail = "\n".join(result.skipped[:10]) if result.skipped else \
+                "Thư mục con ảnh và audio không trùng tên nào.\n" \
+                "Tên thư mục con bên ảnh và bên audio phải GIỐNG HỆT nhau."
+            if result.skipped and len(result.skipped) > 10:
+                detail += f"\n... và {len(result.skipped) - 10} mục khác (xem tab Log)"
+            self.app.root.after(0, lambda: messagebox.showwarning(
+                "Không tạo được project nào",
+                f"Đã quét {result.total} thư mục nhưng tạo 0 project.\n\n"
+                f"Nguyên nhân thường gặp: tên thư mục con ảnh và audio không khớp.\n\n"
+                f"{detail}"))
