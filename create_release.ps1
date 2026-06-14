@@ -29,7 +29,7 @@ if ($Token) {
 }
 
 $repo = $Repo
-$tag = "v1.20.0"
+$tag = "v1.21.0"
 $exePath = "dist\AutoCapCut.exe"
 
 if (-not (Test-Path $exePath)) { throw "Missing $exePath" }
@@ -43,16 +43,17 @@ $headers = @{
 
 $bodyText = @"
 ## Cap nhat
-- Them chuc nang Split Picture (trong tab Sync Audio): cat moi anh dai hon a giay
-  thanh nhieu doan ngan (ngau nhien trong [x;y]), giup them hieu ung cho do chan.
-- Tuy chon Mirror: lat ngang xen ke ~50% cac doan cat ra.
-- Sua loi 'khoang chet': anh dai luon duoc cat ke ca khi y < 2x.
-- Create Project: bao popup ro khi batch tao 0 project (sai ten thu muc con).
+- Them Ani-Trans-Story (tab Sync Audio): ap animation-in + transition tu bo da loc
+  san (chat luong), co danh sach chon kem ten/thoi gian va khoang cach.
+- Them Key Frame Nang Cao: keyframe zoom/pan bat dau sau max(animation, transition)
+  + 0.25s de khong gay nhieu thi giac.
+- Sua loi keyframe chi chay 2-3s tren anh: dong bo source = target nen keyframe
+  trai dung toan bo full duration (ca tab KeyFrame thuong).
 "@
 
 $payload = @{
     tag_name = $tag
-    name = "v1.20.0 - Split Picture"
+    name = "v1.21.0 - Ani-Trans-Story + Key Frame Nang Cao"
     body = $bodyText
     draft = $false
     prerelease = $false

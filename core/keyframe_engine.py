@@ -69,13 +69,21 @@ def _make_kf_group(property_type: str, start_val: float, end_val: float,
 
 
 def _apply_to_segment(seg: dict, option: KeyFrameOption, config: KeyFrameConfig,
-                       canvas_w: int, canvas_h: int):
+                       canvas_w: int, canvas_h: int, is_photo: bool = False):
     """Áp keyframes cho 1 segment.
 
     Position values: user nhập pixel → engine chuyển sang tỉ lệ canvas.
     CapCut formula: keyframe_value = pixel / canvas_dimension
     """
     duration = seg["target_timerange"]["duration"]
+
+    # FIX: ảnh có source_timerange ngắn (vd 4s) hơn target (vd 18s) → CapCut tính
+    # keyframe theo source nên animation chỉ chạy trong source rồi đóng băng.
+    # Đồng bộ source = target để keyframe trải đúng toàn bộ độ dài.
+    if is_photo:
+        st = seg.get("source_timerange", {})
+        if st.get("duration", 0) != duration:
+            seg["source_timerange"] = {"start": 0, "duration": duration}
 
     if config.full_duration:
         end_time = duration
@@ -154,16 +162,16 @@ def apply_keyframes(draft_path: str, config: KeyFrameConfig,
             if config.interval > 0 and seg_idx % config.interval != 0:
                 continue
 
+            mat_id = seg.get("material_id", "")
+            is_photo = capcut.get_material_type(data, mat_id) == "photo"
             # Only Picture: bỏ qua video, chỉ áp cho ảnh
-            if config.only_picture:
-                mat_id = seg.get("material_id", "")
-                if capcut.get_material_type(data, mat_id) != "photo":
-                    continue
+            if config.only_picture and not is_photo:
+                continue
 
             option = config.options[option_idx % option_count]
             option_idx += 1
 
-            _apply_to_segment(seg, option, config, canvas_w, canvas_h)
+            _apply_to_segment(seg, option, config, canvas_w, canvas_h, is_photo=is_photo)
             total_applied += 1
 
     capcut.save_draft_content(draft_path, data)
