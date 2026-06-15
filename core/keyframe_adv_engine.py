@@ -1,5 +1,5 @@
-"""KeyFrame Nâng Cao — keyframe zoom/pan bắt đầu SAU khi animation-in/transition
-của segment chạy xong + 0.25s, để không gây nhiễu thị giác.
+"""KeyFrame Nâng Cao — keyframe zoom/pan bắt đầu NGAY SAU khi animation-in/transition
+của segment chạy xong, để không gây nhiễu thị giác.
 
 Tái sử dụng KeyFrameOption/KeyFrameConfig của keyframe_engine; chỉ khác ở chỗ
 điểm keyframe đầu được dời tới mốc effect_end + padding (ảnh đứng yên trong lúc
@@ -16,7 +16,6 @@ from core.keyframe_engine import (
 )
 
 
-PADDING_US = 250_000          # 0.25s cố định sau khi hiệu ứng vào kết thúc
 MIN_MOTION_US = 200_000       # giữ tối thiểu 0.2s cho chuyển động nếu segment ngắn
 
 
@@ -119,7 +118,7 @@ def _apply_to_segment_adv(seg: dict, option: KeyFrameOption, config: KeyFrameCon
 
 def apply_keyframes_advanced(draft_path: str, config: KeyFrameConfig,
                              backup: bool = True) -> KeyFrameResult:
-    """Áp keyframe bắt đầu sau max(animation, transition) + 0.25s mỗi segment."""
+    """Áp keyframe bắt đầu ngay sau max(animation, transition) mỗi segment."""
     json_path = os.path.join(draft_path, "draft_content.json")
     if not os.path.isfile(json_path):
         return KeyFrameResult(False, "draft_content.json not found")
@@ -158,7 +157,7 @@ def apply_keyframes_advanced(draft_path: str, config: KeyFrameConfig,
             option_idx += 1
 
             eff_end = _segment_effect_end(seg, anim_map, trans_map)
-            start_time = eff_end + PADDING_US
+            start_time = eff_end
 
             _apply_to_segment_adv(seg, option, config, canvas_w, canvas_h,
                                   start_time, is_photo=is_photo)

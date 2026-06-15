@@ -577,7 +577,7 @@ class SyncTab:
         frame.pack(expand=True, fill="both", padx=12, pady=6)
 
         ctk.CTkLabel(
-            frame, text="Keyframe bắt đầu sau max(animation, transition) + 0.25s "
+            frame, text="Keyframe bắt đầu ngay sau max(animation, transition) "
                         "→ ảnh đứng yên khi hiệu ứng vào chạy, rồi mới zoom/pan.",
             font=("Segoe UI", 10), text_color=C["text_light"],
             justify="left", wraplength=540
