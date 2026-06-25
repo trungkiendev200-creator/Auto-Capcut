@@ -83,7 +83,7 @@ class AutoCapcut:
         self.caption_tab = CaptionTab(tabview.add("Caption"), app=self)
 
         self.create_tab_2 = CreateProject2Tab(tabview.add("Create Project 2"), app=self)
-        self.ban_content_tab = BanContentTab(tabview.add("Bán Content"), app=self)
+        self.ban_content_tab = BanContentTab(tabview.add("Import Data"), app=self)
         self.cut_percent_tab = CutPercentTab(tabview.add("Cut %"), app=self)
         self.sync_sub_tab = SyncSubTab(tabview.add("VIP5AE"), app=self)
 

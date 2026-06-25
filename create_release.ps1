@@ -29,7 +29,7 @@ if ($Token) {
 }
 
 $repo = $Repo
-$tag = "v1.22.0"
+$tag = "v1.23.0"
 $exePath = "dist\AutoCapCut.exe"
 
 if (-not (Test-Path $exePath)) { throw "Missing $exePath" }
@@ -43,14 +43,15 @@ $headers = @{
 
 $bodyText = @"
 ## Cap nhat
-- Tach chuc nang Create bck thanh tab rieng "Ban Content".
-- Bo stock ngan/dai. Doan audio co so KHONG khop bat ky thu muc nao trong
-  source edit (anh / video edit / intro) se de TRONG tren track video.
+- Doi "Ban Content" thanh "Import Data": import audio + anh/video (map theo SO ten file)
+  vao 1 project CapCut DA TAO SAN. Chi thay tracks/materials/duration, giu nguyen
+  id/canvas/fps/timeline cua project -> tranh main-track magnet hut don anh ve dau.
+- Thu muc "video edit" va "video intro" gio nhan ca ANH lan video (map theo so nhu nhau).
 "@
 
 $payload = @{
     tag_name = $tag
-    name = "v1.22.0 - Ban Content (tach tab + bo stock)"
+    name = "v1.23.0 - Import Data (vao project co san) + anh trong video folder"
     body = $bodyText
     draft = $false
     prerelease = $false

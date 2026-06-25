@@ -18,6 +18,7 @@ Quy ước:
 
 import os
 import re
+import json
 import struct
 from dataclasses import dataclass, field
 
@@ -302,26 +303,14 @@ class BckResult:
     total_duration_us: int = 0
 
 
-# ── Main builder ──────────────────────────────────────────────────────
+# ── Core builder (dùng chung cho tạo mới & import) ─────────────────────
 
-def build_bck_project(
-    project_name: str,
-    capcut_path: str,
-    source_edit_dir: str,
-    insert_over_audio: bool = True,
-    ratio: str = "16:9",
-    quality: str = "1080p",
-    fps: int = 30,
-    callback=None,
-) -> BckResult:
-    """Xem docstring module. insert_over_audio: True=ĐÈ, False=ĐẨY."""
+def _build_tracks_from_source(source_edit_dir, insert_over_audio, log):
+    """Dựng tracks + materials + duration từ source edit.
 
-    def log(m):
-        if callback:
-            callback(m)
-
-    res = BckResult()
-
+    Trả về (tracks, M, total_duration, stats_dict).
+    Raise ValueError(msg) nếu source không hợp lệ.
+    """
     # 1. Resolve subfolders
     anh_dir = _find_subdir(source_edit_dir, "anh", "image", "images", "pic")
     audio_dir = _find_subdir(source_edit_dir, "audio", "audios")
@@ -330,28 +319,37 @@ def build_bck_project(
     vedit_dir = _find_subdir(source_edit_dir, "video edit", "video_edit",
                              "videoedit", "edit")
     if not audio_dir:
-        return BckResult(False, "Không tìm thấy subfolder 'audio' trong source edit")
+        raise ValueError("Không tìm thấy subfolder 'audio' trong source edit")
 
     audio_files = _list_files(audio_dir, cp.AUDIO_EXTS)
     if not audio_files:
-        return BckResult(False, "Folder audio không có file nào")
+        raise ValueError("Folder audio không có file nào")
 
     VID_EXTS = cp.VIDEO_EXTS | {".m4v", ".webm"}
+    MEDIA_EXTS = VID_EXTS | cp.IMAGE_EXTS  # video edit / intro có thể chứa cả ẢNH
+
+    def _is_image(path):
+        return os.path.splitext(path)[1].lower() in cp.IMAGE_EXTS
+
     image_files = _list_files(anh_dir, cp.IMAGE_EXTS) if anh_dir else []
-    intro_files = _list_files(intro_dir, VID_EXTS) if intro_dir else []
-    vedit_files = _list_files(vedit_dir, VID_EXTS) if vedit_dir else []
+    intro_files = _list_files(intro_dir, MEDIA_EXTS) if intro_dir else []
+    vedit_files = _list_files(vedit_dir, MEDIA_EXTS) if vedit_dir else []
 
     image_map = {n: p for p in image_files if (n := _num_of(p)) is not None}
     intro_map = {}
     for p in intro_files:
         n = _num_of(p)
         if n is not None:
-            intro_map[n] = {"path": p, "dur": _video_duration_us(p)}
+            img = _is_image(p)
+            intro_map[n] = {"path": p, "is_image": img,
+                            "dur": None if img else _video_duration_us(p)}
     vedit_map = {}
     for p in vedit_files:
         n = _num_of(p)
         if n is not None:
-            vedit_map[n] = {"path": p, "dur": _video_duration_us(p)}
+            img = _is_image(p)
+            vedit_map[n] = {"path": p, "is_image": img,
+                            "dur": None if img else _video_duration_us(p)}
 
     log(f"audio={len(audio_files)} | intro={len(intro_map)} | anh={len(image_map)} | "
         f"video edit={len(vedit_map)}")
@@ -365,15 +363,17 @@ def build_bck_project(
         t += d
 
     # 3. Áp shift do intro (ĐẨY) + tính vị trí intro
-    intro_placements = []  # {num, start, dur, path}
+    intro_placements = []  # {num, start, dur, path, is_image}
     acc = 0
     for a in audios:
         n = a["num"]
         if n in intro_map:
-            idur = intro_map[n]["dur"]
+            info = intro_map[n]
+            # ảnh intro không có độ dài riêng → dùng độ dài câu audio tương ứng
+            idur = a["dur"] if info["is_image"] else info["dur"]
             istart = a["orig_start"] + acc
             intro_placements.append({"num": n, "start": istart, "dur": idur,
-                                     "path": intro_map[n]["path"]})
+                                     "path": info["path"], "is_image": info["is_image"]})
             if not insert_over_audio:  # ĐẨY: dịch audio này & sau nó
                 acc += idur
         a["start"] = a["orig_start"] + acc
@@ -391,22 +391,28 @@ def build_bck_project(
     for a in audios:
         audio_segs.append(_add_audio_clip(M, a["path"], a["dur"], a["start"]))
 
-    # 4b. Intro segments
+    # 4b. Intro segments (intro giữ tiếng gốc; ảnh thì không có tiếng)
     for ip in intro_placements:
         seg = _add_video_clip(M, ip["path"], ip["dur"], 0, ip["dur"], ip["start"],
-                              is_photo=False, mute=False)
+                              is_photo=ip["is_image"], mute=False)
         if insert_over_audio:
             overlay_segs.append(seg)   # đè: track riêng phía trên
         else:
             main_segs.append(seg)      # đẩy: inline trên track chính
 
-    # 4c. Video edit đồng bộ audio (cắt nếu dài / speed nếu ngắn) — ưu tiên
+    # 4c. Video edit đồng bộ audio — ưu tiên. Video: cắt nếu dài / speed nếu ngắn.
+    #     Ảnh trong folder video edit: phủ đúng [start, dur] của audio như ảnh thường.
     n_vedit = 0
     for a in audios:
         n = a["num"]
         if n in vedit_map:
-            seg = _add_synced_video(M, vedit_map[n]["path"], vedit_map[n]["dur"],
-                                    a["dur"], a["start"], mute=True)
+            info = vedit_map[n]
+            if info["is_image"]:
+                seg = _add_video_clip(M, info["path"], a["dur"], 0, a["dur"],
+                                      a["start"], is_photo=True, mute=False)
+            else:
+                seg = _add_synced_video(M, info["path"], info["dur"],
+                                        a["dur"], a["start"], mute=True)
             main_segs.append(seg)
             n_vedit += 1
 
@@ -420,16 +426,14 @@ def build_bck_project(
             main_segs.append(seg)
             n_image += 1
 
-    # 5. Đoạn audio có số KHÔNG khớp thư mục nào (không ảnh, không video edit,
-    #    và — với ĐÈ — không intro) → để TRỐNG trên track video (không đắp gì).
-    #    Intro-ĐẨY chiếm slot riêng nên audio đó vẫn coi như chưa có hình.
+    # 5. Đoạn audio có số KHÔNG khớp thư mục nào → để TRỐNG trên track video.
     def _has_visual(a):
         n = a["num"]
         return (n in image_map) or (n in vedit_map) or \
                (insert_over_audio and n in intro_map)
     n_empty = sum(1 for a in audios if not _has_visual(a))
 
-    # 7. Tracks (thứ tự: video chính → overlay → audio)
+    # 6. Tracks (thứ tự: video chính → overlay → audio)
     main_segs.sort(key=lambda s: s["target_timerange"]["start"])
     tracks = [
         {"id": cp._uid(), "type": "video", "segments": main_segs, "flag": 0,
@@ -446,24 +450,111 @@ def build_bck_project(
         {"id": cp._uid(), "type": "audio", "segments": audio_segs, "flag": 0,
          "attribute": 0, "name": "", "is_default_name": True})
 
-    # 8. Build + save
+    stats = {"n_audio": len(audios), "n_intro": len(intro_placements),
+             "n_image": n_image, "n_video_edit": n_vedit, "n_empty": n_empty}
+    return tracks, M, total_duration, stats
+
+
+def build_bck_project(
+    project_name: str,
+    capcut_path: str,
+    source_edit_dir: str,
+    insert_over_audio: bool = True,
+    ratio: str = "16:9",
+    quality: str = "1080p",
+    fps: int = 30,
+    callback=None,
+) -> BckResult:
+    """Tạo project MỚI từ source edit. insert_over_audio: True=ĐÈ, False=ĐẨY."""
+
+    def log(m):
+        if callback:
+            callback(m)
+
+    try:
+        tracks, M, total_duration, st = _build_tracks_from_source(
+            source_edit_dir, insert_over_audio, log)
+    except ValueError as e:
+        return BckResult(False, str(e))
+
     project_id = cp._uid()
     canvas = cp._canvas_config(ratio, quality)
     draft = cp.build_draft_content(project_id, project_name, fps,
                                    total_duration, canvas, tracks, M)
     project_folder = cp.save_project(capcut_path, project_name, draft)
 
-    res.success = True
-    res.project_path = project_folder
-    res.n_audio = len(audios)
-    res.n_intro = len(intro_placements)
-    res.n_image = n_image
-    res.n_video_edit = n_vedit
-    res.n_empty = n_empty
-    res.total_duration_us = total_duration
+    res = BckResult(True, "", project_folder, st["n_audio"], st["n_intro"],
+                    st["n_image"], st["n_video_edit"], st["n_empty"], total_duration)
     res.message = (f"OK '{project_name}': {res.n_audio} audio, {res.n_intro} intro, "
-                   f"{res.n_image} ảnh, {n_vedit} video edit, "
-                   f"{n_empty} đoạn trống, "
-                   f"dur={total_duration/1_000_000:.1f}s")
+                   f"{res.n_image} ảnh, {res.n_video_edit} video edit, "
+                   f"{res.n_empty} đoạn trống, dur={total_duration/1_000_000:.1f}s")
+    log(res.message)
+    return res
+
+
+def import_into_project(
+    project_folder: str,
+    source_edit_dir: str,
+    insert_over_audio: bool = True,
+    callback=None,
+) -> BckResult:
+    """Import data vào 1 project CapCut ĐÃ TẠO SẴN (giữ nguyên id/canvas/fps/timeline).
+
+    Chỉ thay 'tracks' + 'materials' + 'duration' trong draft của project đó —
+    không động tới cấu trúc khác, nên giữ được setting (vd magnet đã tắt) của project.
+    """
+    def log(m):
+        if callback:
+            callback(m)
+
+    root_draft = os.path.join(project_folder, "draft_content.json")
+    if not os.path.isfile(root_draft):
+        return BckResult(False, f"Không tìm thấy draft_content.json trong {project_folder}")
+
+    try:
+        tracks, M, total_duration, st = _build_tracks_from_source(
+            source_edit_dir, insert_over_audio, log)
+    except ValueError as e:
+        return BckResult(False, str(e))
+
+    # Surgical inject: thay tracks/materials/duration trong MỌI draft_content.json
+    # (root + Timelines/<id>/) — giữ nguyên phần còn lại của project.
+    import glob
+    targets = [root_draft]
+    targets += glob.glob(os.path.join(project_folder, "Timelines", "*",
+                                      "draft_content.json"))
+    name = os.path.basename(project_folder.rstrip("/\\"))
+    written = 0
+    for path in targets:
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                d = json.load(f)
+        except Exception:
+            continue
+        d["materials"] = M
+        d["tracks"] = tracks
+        d["duration"] = total_duration
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(d, f, ensure_ascii=False)
+        written += 1
+
+    # Cập nhật tm_duration trong meta nếu có
+    meta_path = os.path.join(project_folder, "draft_meta_info.json")
+    if os.path.isfile(meta_path):
+        try:
+            with open(meta_path, "r", encoding="utf-8") as f:
+                meta = json.load(f)
+            meta["tm_duration"] = total_duration
+            with open(meta_path, "w", encoding="utf-8") as f:
+                json.dump(meta, f, ensure_ascii=False)
+        except Exception:
+            pass
+
+    res = BckResult(True, "", project_folder, st["n_audio"], st["n_intro"],
+                    st["n_image"], st["n_video_edit"], st["n_empty"], total_duration)
+    res.message = (f"Import '{name}': {res.n_audio} audio, {res.n_intro} intro, "
+                   f"{res.n_image} ảnh, {res.n_video_edit} video edit, "
+                   f"{res.n_empty} đoạn trống, dur={total_duration/1_000_000:.1f}s "
+                   f"({written} timeline)")
     log(res.message)
     return res
