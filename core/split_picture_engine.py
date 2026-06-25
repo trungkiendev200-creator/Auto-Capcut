@@ -98,26 +98,41 @@ def _plan_durations(D: int, x_us: int, y_us: int, rng: random.Random) -> list[in
 
 
 def _split_segment(orig: dict, materials: dict, idmap: dict,
-                   durations: list[int], mirror: bool = False) -> list[dict]:
-    """Tạo list segment mới từ 1 segment ảnh gốc theo các durations cho trước.
+                   durations: list[int], is_photo: bool = True,
+                   mirror: bool = False) -> list[dict]:
+    """Tạo list segment mới từ 1 segment (ảnh HOẶC video) theo durations cho trước.
 
-    - Giữ nguyên material_id (cùng file ảnh).
+    - Giữ nguyên material_id (cùng file).
     - Nhân bản toàn bộ extra_material_refs (speed/canvas/sound_channel/...) cho
       từng đoạn — đúng cách CapCut tự làm khi split thủ công.
     - target_timerange ghép nối tiếp bắt đầu từ start của segment gốc.
-    - mirror=True: lật ngang (Mirror) xen kẽ ~50% số đoạn (đoạn lẻ 1,3,5...) →
-      2 đoạn liền kề luôn khác nhau.
+    - Ảnh: source không ràng buộc frame → đặt {0, dur}.
+    - Video: source PHẢI tiến theo từng đoạn để mỗi đoạn hiện đúng phần video +
+      audio tương ứng (tỉ lệ src/tgt giữ nguyên speed gốc).
+    - mirror=True: lật ngang xen kẽ ~50% số đoạn (đoạn lẻ 1,3,5...).
     """
     start = orig["target_timerange"]["start"]
+    src = orig.get("source_timerange") or {}
+    tgt_dur0 = orig["target_timerange"]["duration"]
+    src_start0 = src.get("start", 0)
+    src_dur0 = src.get("duration", tgt_dur0)
+    ratio = (src_dur0 / tgt_dur0) if tgt_dur0 else 1.0
+
     new_segments = []
     cur = start
+    src_cur = src_start0
 
     for i, dur in enumerate(durations):
         seg = copy.deepcopy(orig)
         seg["id"] = _uid()
         seg["target_timerange"] = {"start": cur, "duration": dur}
-        # Ảnh: source không ràng buộc frame thật → đặt khớp duration cho gọn
-        seg["source_timerange"] = {"start": 0, "duration": dur}
+        if is_photo:
+            seg["source_timerange"] = {"start": 0, "duration": dur}
+        else:
+            # Video: tiến source theo tỉ lệ để hiển thị đúng đoạn video kế tiếp
+            src_d = int(round(dur * ratio))
+            seg["source_timerange"] = {"start": int(round(src_cur)), "duration": src_d}
+            src_cur += src_d
 
         # Mirror xen kẽ: lật ngang các đoạn ở vị trí lẻ
         if mirror and i % 2 == 1:
@@ -148,11 +163,11 @@ def _split_segment(orig: dict, materials: dict, idmap: dict,
 
 def split_pictures(draft_path: str, a_sec: float, x_sec: float, y_sec: float,
                    mirror: bool = False, seed: int | None = None) -> SplitResult:
-    """Cắt mọi ảnh có duration > a thành các đoạn ∈ [x; y] giây.
+    """Cắt mọi ảnh/video có duration > a thành các đoạn ∈ [x; y] giây.
 
     Args:
         draft_path: thư mục project CapCut.
-        a_sec: ngưỡng (giây) — chỉ cắt ảnh dài hơn a.
+        a_sec: ngưỡng (giây) — chỉ cắt clip dài hơn a.
         x_sec, y_sec: khoảng độ dài mỗi đoạn (giây), 0 < x <= y.
         mirror: True = lật ngang (Mirror) xen kẽ ~50% số đoạn trong mỗi ảnh cắt ra.
         seed: seed random (None = ngẫu nhiên thật).
@@ -186,10 +201,13 @@ def split_pictures(draft_path: str, a_sec: float, x_sec: float, y_sec: float,
         new_track_segs = []
         for seg in segs:
             mat_entry = idmap.get(seg.get("material_id"))
-            is_photo = bool(mat_entry) and mat_entry[1].get("type") == "photo"
+            mat_type = mat_entry[1].get("type") if mat_entry else None
+            is_photo = mat_type == "photo"
+            is_video = mat_type == "video"
             D = seg["target_timerange"]["duration"]
 
-            if not is_photo or D <= a_us:
+            # Cắt được cho cả ảnh lẫn video
+            if not (is_photo or is_video) or D <= a_us:
                 new_track_segs.append(seg)
                 continue
 
@@ -198,7 +216,8 @@ def split_pictures(draft_path: str, a_sec: float, x_sec: float, y_sec: float,
                 new_track_segs.append(seg)  # không cắt được hợp lệ → giữ nguyên
                 continue
 
-            pieces = _split_segment(seg, materials, idmap, durations, mirror=mirror)
+            pieces = _split_segment(seg, materials, idmap, durations,
+                                    is_photo=is_photo, mirror=mirror)
             new_track_segs.extend(pieces)
             images_split += 1
             segments_created += len(pieces)
@@ -206,7 +225,7 @@ def split_pictures(draft_path: str, a_sec: float, x_sec: float, y_sec: float,
         track["segments"] = new_track_segs
 
     if images_split == 0:
-        return SplitResult(True, "Không có ảnh nào cần cắt (đều ≤ a hoặc không tile được)",
+        return SplitResult(True, "Không có ảnh/video nào cần cắt (đều ≤ a hoặc không tile được)",
                            0, 0)
 
     try:
@@ -214,5 +233,5 @@ def split_pictures(draft_path: str, a_sec: float, x_sec: float, y_sec: float,
     except Exception as e:
         return SplitResult(False, f"Lỗi ghi draft: {e}")
 
-    msg = f"Cắt {images_split} ảnh → {segments_created} đoạn"
+    msg = f"Cắt {images_split} clip → {segments_created} đoạn"
     return SplitResult(True, msg, images_split, segments_created)

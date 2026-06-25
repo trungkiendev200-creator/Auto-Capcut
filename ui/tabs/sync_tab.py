@@ -202,7 +202,7 @@ class SyncTab:
 
         ctk.CTkLabel(
             frame,
-            text="Cắt mỗi ảnh dài hơn 'a' giây thành nhiều đoạn ngắn (cùng 1 ảnh), "
+            text="Cắt mỗi ảnh/video dài hơn 'a' giây thành nhiều đoạn ngắn, "
                  "mỗi đoạn dài ngẫu nhiên trong [x; y] giây. Audio giữ nguyên.",
             font=FONT["small"], text_color=C["text_light"], justify="left", wraplength=520
         ).pack(anchor="w", pady=(0, 12))

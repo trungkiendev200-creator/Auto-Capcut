@@ -332,6 +332,252 @@ def _make_audio_segment(material_id: str, start: int, duration: int,
     }
 
 
+def _canvas_config(ratio: str, quality: str) -> dict:
+    """Build canvas_config dict từ ratio + quality preset."""
+    canvas = CANVAS_PRESETS.get(ratio, CANVAS_PRESETS["16:9"]).copy()
+    if quality in QUALITY_PRESETS:
+        qw, qh = QUALITY_PRESETS[quality]
+        if ratio == "9:16":
+            canvas["width"], canvas["height"] = qh, qw
+        elif ratio == "1:1":
+            canvas["width"] = canvas["height"] = min(qw, qh)
+        else:
+            canvas["width"], canvas["height"] = qw, qh
+    canvas["background"] = None
+    return canvas
+
+
+def _build_materials_dict(video_materials, audio_materials, canvas_materials,
+                          sound_channels, beat_materials, speed_materials) -> dict:
+    """Build materials dict đầy đủ schema CapCut."""
+    return {
+        "flowers": [],
+        "videos": video_materials,
+        "tail_leaders": [],
+        "audios": audio_materials,
+        "images": [],
+        "texts": [],
+        "effects": [],
+        "stickers": [],
+        "canvases": canvas_materials,
+        "transitions": [],
+        "audio_effects": [],
+        "audio_fades": [],
+        "beats": beat_materials,
+        "material_animations": [],
+        "placeholders": [],
+        "placeholder_infos": [],
+        "speeds": speed_materials,
+        "common_mask": [],
+        "chromas": [],
+        "text_templates": [],
+        "realtime_denoises": [],
+        "audio_pannings": [],
+        "audio_pitch_shifts": [],
+        "video_trackings": [],
+        "hsl": [],
+        "drafts": [],
+        "color_curves": [],
+        "hsl_curves": [],
+        "primary_color_wheels": [],
+        "log_color_wheels": [],
+        "video_effects": [],
+        "audio_balances": [],
+        "handwrites": [],
+        "manual_deformations": [],
+        "manual_beautys": [],
+        "plugin_effects": [],
+        "sound_channel_mappings": sound_channels,
+        "green_screens": [],
+        "shapes": [],
+        "material_colors": [],
+        "digital_humans": [],
+        "smart_crops": [],
+        "ai_translates": [],
+        "audio_track_indexes": [],
+        "loudnesses": [],
+        "vocal_beautifys": [],
+        "vocal_separations": [],
+        "smart_relights": [],
+        "time_marks": [],
+        "multi_language_refs": [],
+        "video_shadows": [],
+        "video_strokes": [],
+        "video_radius": [],
+    }
+
+
+def build_draft_content(project_id: str, name: str, fps: int, total_duration: int,
+                        canvas: dict, tracks: list, materials: dict) -> dict:
+    """Wrap tracks + materials thành draft_content.json hoàn chỉnh."""
+    return {
+        "id": project_id,
+        "version": "",
+        "new_version": "163.0.0",
+        "name": name,
+        "duration": total_duration,
+        "create_time": int(time.time()),
+        "update_time": int(time.time()),
+        "fps": float(fps),
+        "is_drop_frame_timecode": False,
+        "color_space": 0,
+        "config": {"adjust_max_index": 1, "attachment_info": []},
+        "canvas_config": canvas,
+        "tracks": tracks,
+        "group_container": {"groups": []},
+        "materials": materials,
+        "keyframes": {"videos": [], "audios": [], "texts": [], "stickers": [], "filters": [],
+                      "handwrites": [], "shapes": [], "transitions": []},
+        "keyframe_graph_list": [],
+        "platform": {"app_id": 3704, "app_source": "cc", "app_version": "8.3.0",
+                     "device_id": "", "hard_disk_id": "", "mac_address": "",
+                     "os": "windows", "os_version": "10.0.19045"},
+        "last_modified_platform": {"app_id": 3704, "app_source": "cc", "app_version": "8.3.0",
+                                   "os": "windows", "os_version": "10.0.19045"},
+        "mutable_config": None,
+        "cover": "",
+        "extra_info": "",
+        "relationships": [],
+        "render_index_track_mode_on": False,
+        "free_render_index_mode_on": False,
+        "static_cover_image_path": "",
+        "source": "default",
+        "time_marks": [],
+        "lyrics_effects": [],
+        "draft_type": "",
+    }
+
+
+def save_project(capcut_path: str, project_name: str, draft_content: dict) -> str:
+    """Ghi toàn bộ file project (draft_content, Timelines, meta, root_meta).
+
+    Trả về đường dẫn project folder.
+    """
+    project_id = draft_content["id"]
+    total_duration = draft_content["duration"]
+
+    draft_root = capcut.get_draft_root(capcut_path)
+    project_folder = os.path.join(draft_root, project_name)
+    os.makedirs(project_folder, exist_ok=True)
+
+    # Save draft_content.json
+    content_path = os.path.join(project_folder, "draft_content.json")
+    with open(content_path, "w", encoding="utf-8") as f:
+        json.dump(draft_content, f, ensure_ascii=False)
+
+    # Save Timelines/<project_id>/draft_content.json (CapCut mới yêu cầu)
+    timelines_dir = os.path.join(project_folder, "Timelines", project_id)
+    os.makedirs(timelines_dir, exist_ok=True)
+    tl_content_path = os.path.join(timelines_dir, "draft_content.json")
+    with open(tl_content_path, "w", encoding="utf-8") as f:
+        json.dump(draft_content, f, ensure_ascii=False)
+
+    # Save Timelines/project.json
+    tl_proj_path = os.path.join(project_folder, "Timelines", "project.json")
+    tl_proj = {
+        "config": {
+            "color_space": 0,
+            "render_index_track_mode_on": False,
+            "use_float_render": False,
+        },
+        "create_time": int(time.time() * 1_000_000),
+        "id": project_id,
+        "main_timeline_id": project_id,
+        "timelines": [{
+            "create_time": int(time.time() * 1_000_000),
+            "id": project_id,
+            "is_marked_delete": False,
+            "name": "Timeline 01",
+            "update_time": int(time.time() * 1_000_000),
+        }],
+        "update_time": int(time.time() * 1_000_000),
+        "version": 0,
+    }
+    with open(tl_proj_path, "w", encoding="utf-8") as f:
+        json.dump(tl_proj, f, ensure_ascii=False)
+
+    # Save draft_meta_info.json
+    now_us = int(time.time() * 1_000_000)
+    draft_meta = {
+        "cloud_draft_cover": False,
+        "cloud_draft_sync": False,
+        "draft_cloud_last_action_download": False,
+        "draft_cloud_purchase_info": "",
+        "draft_cloud_template_id": "",
+        "draft_cloud_tutorial_info": "",
+        "draft_cloud_videocut_purchase_info": "",
+        "draft_cover": "",
+        "draft_fold_path": project_folder.replace("/", "\\"),
+        "draft_id": project_id,
+        "draft_is_ai_shorts": False,
+        "draft_is_cloud_temp_draft": False,
+        "draft_is_invisible": False,
+        "draft_name": project_name,
+        "draft_new_version": "",
+        "draft_root_path": draft_root.replace("/", "\\"),
+        "draft_timeline_materials_size_": 0,
+        "tm_draft_create": now_us,
+        "tm_draft_modified": now_us,
+        "tm_draft_removed": 0,
+        "tm_duration": total_duration,
+    }
+    meta_path = os.path.join(project_folder, "draft_meta_info.json")
+    with open(meta_path, "w", encoding="utf-8") as f:
+        json.dump(draft_meta, f, ensure_ascii=False)
+
+    # Update root_meta_info.json
+    root_meta_path = os.path.join(draft_root, "root_meta_info.json")
+    with open(root_meta_path, "r", encoding="utf-8") as f:
+        root_meta = json.load(f)
+
+    root_entry = {
+        "cloud_draft_cover": False,
+        "cloud_draft_sync": False,
+        "draft_cloud_last_action_download": False,
+        "draft_cloud_purchase_info": "",
+        "draft_cloud_template_id": "",
+        "draft_cloud_tutorial_info": "",
+        "draft_cloud_videocut_purchase_info": "",
+        "draft_cover": "",
+        "draft_fold_path": project_folder.replace("\\", "/"),
+        "draft_id": project_id,
+        "draft_is_ai_shorts": False,
+        "draft_is_cloud_temp_draft": False,
+        "draft_is_invisible": False,
+        "draft_is_web_article_video": False,
+        "draft_json_file": content_path.replace("\\", "/"),
+        "draft_name": project_name,
+        "draft_new_version": "",
+        "draft_root_path": draft_root.replace("/", "\\"),
+        "draft_timeline_materials_size": 0,
+        "draft_type": "",
+        "draft_web_article_video_enter_from": "",
+        "streaming_edit_draft_ready": True,
+        "tm_draft_cloud_completed": "",
+        "tm_draft_cloud_entry_id": -1,
+        "tm_draft_cloud_modified": 0,
+        "tm_draft_cloud_parent_entry_id": -1,
+        "tm_draft_cloud_space_id": -1,
+        "tm_draft_cloud_user_id": -1,
+        "tm_draft_create": now_us,
+        "tm_draft_modified": now_us,
+        "tm_draft_removed": 0,
+        "tm_duration": total_duration,
+    }
+
+    # Remove old entry with same name if exists
+    root_meta["all_draft_store"] = [
+        d for d in root_meta["all_draft_store"]
+        if d.get("draft_name") != project_name
+    ]
+    root_meta["all_draft_store"].insert(0, root_entry)
+
+    with open(root_meta_path, "w", encoding="utf-8") as f:
+        json.dump(root_meta, f, ensure_ascii=False)
+
+    return project_folder
+
+
 def create_project(
     config: CreateConfig,
     capcut_path: str,
@@ -360,17 +606,7 @@ def create_project(
         audio_files = _scan_files(config.audio_folder, AUDIO_EXTS)
 
     # Canvas config
-    canvas = CANVAS_PRESETS.get(config.ratio, CANVAS_PRESETS["16:9"]).copy()
-    if config.quality in QUALITY_PRESETS:
-        qw, qh = QUALITY_PRESETS[config.quality]
-        if config.ratio == "9:16":
-            canvas["width"], canvas["height"] = qh, qw
-        elif config.ratio == "1:1":
-            canvas["width"] = canvas["height"] = min(qw, qh)
-        else:
-            canvas["width"], canvas["height"] = qw, qh
-
-    canvas["background"] = None
+    canvas = _canvas_config(config.ratio, config.quality)
 
     # Duration per image (microseconds)
     img_dur = int(config.image_duration * 1_000_000)
@@ -446,216 +682,14 @@ def create_project(
              "attribute": 0, "name": "", "is_default_name": True}
         )
 
-    draft_content = {
-        "id": project_id,
-        "version": "",
-        "new_version": "163.0.0",
-        "name": config.project_name,
-        "duration": total_duration,
-        "create_time": int(time.time()),
-        "update_time": int(time.time()),
-        "fps": float(config.fps),
-        "is_drop_frame_timecode": False,
-        "color_space": 0,
-        "config": {"adjust_max_index": 1, "attachment_info": []},
-        "canvas_config": canvas,
-        "tracks": tracks,
-        "group_container": {"groups": []},
-        "materials": {
-            "flowers": [],
-            "videos": video_materials,
-            "tail_leaders": [],
-            "audios": audio_materials,
-            "images": [],
-            "texts": [],
-            "effects": [],
-            "stickers": [],
-            "canvases": canvas_materials,
-            "transitions": [],
-            "audio_effects": [],
-            "audio_fades": [],
-            "beats": beat_materials,
-            "material_animations": [],
-            "placeholders": [],
-            "placeholder_infos": [],
-            "speeds": speed_materials,
-            "common_mask": [],
-            "chromas": [],
-            "text_templates": [],
-            "realtime_denoises": [],
-            "audio_pannings": [],
-            "audio_pitch_shifts": [],
-            "video_trackings": [],
-            "hsl": [],
-            "drafts": [],
-            "color_curves": [],
-            "hsl_curves": [],
-            "primary_color_wheels": [],
-            "log_color_wheels": [],
-            "video_effects": [],
-            "audio_balances": [],
-            "handwrites": [],
-            "manual_deformations": [],
-            "manual_beautys": [],
-            "plugin_effects": [],
-            "sound_channel_mappings": sound_channels,
-            "green_screens": [],
-            "shapes": [],
-            "material_colors": [],
-            "digital_humans": [],
-            "smart_crops": [],
-            "ai_translates": [],
-            "audio_track_indexes": [],
-            "loudnesses": [],
-            "vocal_beautifys": [],
-            "vocal_separations": [],
-            "smart_relights": [],
-            "time_marks": [],
-            "multi_language_refs": [],
-            "video_shadows": [],
-            "video_strokes": [],
-            "video_radius": [],
-        },
-        "keyframes": {"videos": [], "audios": [], "texts": [], "stickers": [], "filters": [],
-                      "handwrites": [], "shapes": [], "transitions": []},
-        "keyframe_graph_list": [],
-        "platform": {"app_id": 3704, "app_source": "cc", "app_version": "8.3.0",
-                     "device_id": "", "hard_disk_id": "", "mac_address": "",
-                     "os": "windows", "os_version": "10.0.19045"},
-        "last_modified_platform": {"app_id": 3704, "app_source": "cc", "app_version": "8.3.0",
-                                   "os": "windows", "os_version": "10.0.19045"},
-        "mutable_config": None,
-        "cover": "",
-        "extra_info": "",
-        "relationships": [],
-        "render_index_track_mode_on": False,
-        "free_render_index_mode_on": False,
-        "static_cover_image_path": "",
-        "source": "default",
-        "time_marks": [],
-        "lyrics_effects": [],
-        "draft_type": "",
-    }
+    materials = _build_materials_dict(
+        video_materials, audio_materials, canvas_materials,
+        sound_channels, beat_materials, speed_materials)
+    draft_content = build_draft_content(
+        project_id, config.project_name, config.fps, total_duration,
+        canvas, tracks, materials)
 
-    # Create project folder
-    draft_root = capcut.get_draft_root(capcut_path)
-    project_folder = os.path.join(draft_root, config.project_name)
-    os.makedirs(project_folder, exist_ok=True)
-
-    # Save draft_content.json
-    content_path = os.path.join(project_folder, "draft_content.json")
-    with open(content_path, "w", encoding="utf-8") as f:
-        json.dump(draft_content, f, ensure_ascii=False)
-
-    # Save Timelines/<project_id>/draft_content.json (CapCut mới yêu cầu)
-    timelines_dir = os.path.join(project_folder, "Timelines", project_id)
-    os.makedirs(timelines_dir, exist_ok=True)
-    tl_content_path = os.path.join(timelines_dir, "draft_content.json")
-    with open(tl_content_path, "w", encoding="utf-8") as f:
-        json.dump(draft_content, f, ensure_ascii=False)
-
-    # Save Timelines/project.json
-    tl_proj_path = os.path.join(project_folder, "Timelines", "project.json")
-    tl_proj = {
-        "config": {
-            "color_space": 0,
-            "render_index_track_mode_on": False,
-            "use_float_render": False,
-        },
-        "create_time": int(time.time() * 1_000_000),
-        "id": project_id,
-        "main_timeline_id": project_id,
-        "timelines": [{
-            "create_time": int(time.time() * 1_000_000),
-            "id": project_id,
-            "is_marked_delete": False,
-            "name": "Timeline 01",
-            "update_time": int(time.time() * 1_000_000),
-        }],
-        "update_time": int(time.time() * 1_000_000),
-        "version": 0,
-    }
-    with open(tl_proj_path, "w", encoding="utf-8") as f:
-        json.dump(tl_proj, f, ensure_ascii=False)
-
-    # Save draft_meta_info.json
-    now_us = int(time.time() * 1_000_000)
-    draft_meta = {
-        "cloud_draft_cover": False,
-        "cloud_draft_sync": False,
-        "draft_cloud_last_action_download": False,
-        "draft_cloud_purchase_info": "",
-        "draft_cloud_template_id": "",
-        "draft_cloud_tutorial_info": "",
-        "draft_cloud_videocut_purchase_info": "",
-        "draft_cover": "",
-        "draft_fold_path": project_folder.replace("/", "\\"),
-        "draft_id": project_id,
-        "draft_is_ai_shorts": False,
-        "draft_is_cloud_temp_draft": False,
-        "draft_is_invisible": False,
-        "draft_name": config.project_name,
-        "draft_new_version": "",
-        "draft_root_path": draft_root.replace("/", "\\"),
-        "draft_timeline_materials_size_": 0,
-        "tm_draft_create": now_us,
-        "tm_draft_modified": now_us,
-        "tm_draft_removed": 0,
-        "tm_duration": total_duration,
-    }
-    meta_path = os.path.join(project_folder, "draft_meta_info.json")
-    with open(meta_path, "w", encoding="utf-8") as f:
-        json.dump(draft_meta, f, ensure_ascii=False)
-
-    # Update root_meta_info.json
-    root_meta_path = os.path.join(draft_root, "root_meta_info.json")
-    with open(root_meta_path, "r", encoding="utf-8") as f:
-        root_meta = json.load(f)
-
-    root_entry = {
-        "cloud_draft_cover": False,
-        "cloud_draft_sync": False,
-        "draft_cloud_last_action_download": False,
-        "draft_cloud_purchase_info": "",
-        "draft_cloud_template_id": "",
-        "draft_cloud_tutorial_info": "",
-        "draft_cloud_videocut_purchase_info": "",
-        "draft_cover": "",
-        "draft_fold_path": project_folder.replace("\\", "/"),
-        "draft_id": project_id,
-        "draft_is_ai_shorts": False,
-        "draft_is_cloud_temp_draft": False,
-        "draft_is_invisible": False,
-        "draft_is_web_article_video": False,
-        "draft_json_file": content_path.replace("\\", "/"),
-        "draft_name": config.project_name,
-        "draft_new_version": "",
-        "draft_root_path": draft_root.replace("/", "\\"),
-        "draft_timeline_materials_size": 0,
-        "draft_type": "",
-        "draft_web_article_video_enter_from": "",
-        "streaming_edit_draft_ready": True,
-        "tm_draft_cloud_completed": "",
-        "tm_draft_cloud_entry_id": -1,
-        "tm_draft_cloud_modified": 0,
-        "tm_draft_cloud_parent_entry_id": -1,
-        "tm_draft_cloud_space_id": -1,
-        "tm_draft_cloud_user_id": -1,
-        "tm_draft_create": now_us,
-        "tm_draft_modified": now_us,
-        "tm_draft_removed": 0,
-        "tm_duration": total_duration,
-    }
-
-    # Remove old entry with same name if exists
-    root_meta["all_draft_store"] = [
-        d for d in root_meta["all_draft_store"]
-        if d.get("draft_name") != config.project_name
-    ]
-    root_meta["all_draft_store"].insert(0, root_entry)
-
-    with open(root_meta_path, "w", encoding="utf-8") as f:
-        json.dump(root_meta, f, ensure_ascii=False)
+    project_folder = save_project(capcut_path, config.project_name, draft_content)
 
     msg = f"Created '{config.project_name}': {len(media_files)} media, {len(audio_files)} audio"
     return CreateResult(True, msg, project_folder)

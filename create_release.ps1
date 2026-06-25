@@ -29,7 +29,7 @@ if ($Token) {
 }
 
 $repo = $Repo
-$tag = "v1.21.1"
+$tag = "v1.22.0"
 $exePath = "dist\AutoCapCut.exe"
 
 if (-not (Test-Path $exePath)) { throw "Missing $exePath" }
@@ -43,13 +43,14 @@ $headers = @{
 
 $bodyText = @"
 ## Cap nhat
-- Key Frame Nang Cao: bo padding 0.25s — keyframe bat dau ngay sau
-  max(animation, transition) cho muot lien mach.
+- Tach chuc nang Create bck thanh tab rieng "Ban Content".
+- Bo stock ngan/dai. Doan audio co so KHONG khop bat ky thu muc nao trong
+  source edit (anh / video edit / intro) se de TRONG tren track video.
 "@
 
 $payload = @{
     tag_name = $tag
-    name = "v1.21.1 - Key Frame Nang Cao (bo padding)"
+    name = "v1.22.0 - Ban Content (tach tab + bo stock)"
     body = $bodyText
     draft = $false
     prerelease = $false
