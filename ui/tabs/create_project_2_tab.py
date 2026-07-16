@@ -10,6 +10,7 @@ from ui.theme import COLORS as C, FONT
 from core import create_project as cp
 from core import split_project as splitp
 from core import split_project_2 as splitp2
+from core import auto_stories_engine as ase
 
 
 class CreateProject2Tab:
@@ -40,6 +41,7 @@ class CreateProject2Tab:
 
         self._build_from_videos_tab(sub_tabs.add("Base on folder video"))
         self._build_manhwa_tab(sub_tabs.add("Manhwa"))
+        self._build_auto_stories_tab(sub_tabs.add("Auto Stories"))
         self._build_split_tab(sub_tabs.add("Split projects"))
         self._build_split_v2_tab(sub_tabs.add("Split project 2"))
 
@@ -472,6 +474,194 @@ class CreateProject2Tab:
             state="normal", text="Tạo dự án và xuất âm thanh"))
         root.after(0, lambda: self.app.status_var.set(f"  {summary}"))
 
+        if r.created > 0:
+            root.after(0, self.app._load_projects)
+
+    # ── Sub-tab: Auto Stories ──────────────────────────────────────
+    def _build_auto_stories_tab(self, parent):
+        f = ctk.CTkFrame(parent, fg_color="transparent")
+        f.pack(fill="both", expand=True, padx=10, pady=8)
+
+        ctk.CTkLabel(
+            f,
+            text="Ghép VOICE + ẢNH (map theo TÊN file trùng) + VIDEO STOCK nền (random không trùng).\n"
+                 "Ảnh & video kéo dài = voice; video ngắn hơn → lặp, dài hơn → cắt. "
+                 "Tên project = Tiền tố + tên voice (vd: brazil stories video21).",
+            font=("Segoe UI", 10), text_color=C["text_light"],
+            justify="left", wraplength=560,
+        ).pack(anchor="w", pady=(0, 8))
+
+        # Folder pickers
+        self.as_pic_var = ctk.StringVar()
+        self.as_voice_var = ctk.StringVar()
+        self.as_stock_var = ctk.StringVar()
+        self._as_folder_row(f, "Picture:", self.as_pic_var)
+        self._as_folder_row(f, "Voice:", self.as_voice_var)
+        self._as_folder_row(f, "Video stock:", self.as_stock_var)
+
+        # Prefix
+        rp = ctk.CTkFrame(f, fg_color="transparent")
+        rp.pack(fill="x", pady=(0, 4))
+        ctk.CTkLabel(rp, text="Tiền tố:", width=110, anchor="w",
+                     font=FONT["small"], text_color=C["text_light"]).pack(side="left")
+        self.as_prefix_var = ctk.StringVar(value="brazil stories")
+        ctk.CTkEntry(rp, textvariable=self.as_prefix_var, height=28,
+                     fg_color=C["input_bg"], border_color=C["input_border"],
+                     text_color=C["text"], corner_radius=6, font=FONT["small"],
+                     placeholder_text="vd: brazil stories"
+                     ).pack(side="left", fill="x", expand=True, padx=(4, 4))
+
+        # Settings card (ratio / quality / fps)
+        sett = ctk.CTkFrame(f, fg_color=C["primary_light"], corner_radius=6)
+        sett.pack(fill="x", pady=(8, 8))
+        s = ctk.CTkFrame(sett, fg_color="transparent")
+        s.pack(fill="x", padx=10, pady=8)
+
+        ctk.CTkLabel(s, text="Ratio:", font=FONT["small"],
+                     text_color=C["text"]).pack(side="left")
+        self.as_ratio_var = ctk.StringVar(value="16:9")
+        ctk.CTkOptionMenu(s, variable=self.as_ratio_var,
+                          values=["16:9", "9:16", "1:1", "4:3"],
+                          width=70, height=28, corner_radius=6,
+                          fg_color=C["card"], button_color=C["primary"],
+                          text_color=C["text"], font=FONT["small"]
+                          ).pack(side="left", padx=(4, 12))
+
+        ctk.CTkLabel(s, text="Quality:", font=FONT["small"],
+                     text_color=C["text"]).pack(side="left")
+        self.as_quality_var = ctk.StringVar(value="1080p")
+        ctk.CTkOptionMenu(s, variable=self.as_quality_var,
+                          values=["1080p", "720p", "4K"],
+                          width=80, height=28, corner_radius=6,
+                          fg_color=C["card"], button_color=C["primary"],
+                          text_color=C["text"], font=FONT["small"]
+                          ).pack(side="left", padx=(4, 12))
+
+        ctk.CTkLabel(s, text="FPS:", font=FONT["small"],
+                     text_color=C["text"]).pack(side="left")
+        self.as_fps_var = ctk.StringVar(value="30")
+        ctk.CTkOptionMenu(s, variable=self.as_fps_var,
+                          values=["30", "60"],
+                          width=60, height=28, corner_radius=6,
+                          fg_color=C["card"], button_color=C["primary"],
+                          text_color=C["text"], font=FONT["small"]
+                          ).pack(side="left", padx=(4, 0))
+
+        self.as_btn = ctk.CTkButton(
+            f, text="Tạo Auto Stories", height=36, corner_radius=8,
+            fg_color=C["accent"], hover_color="#7c3aed",
+            text_color=C["text_white"], font=FONT["button"],
+            command=self._on_stories_create
+        )
+        self.as_btn.pack(fill="x")
+
+    def _as_folder_row(self, parent, label, var):
+        r = ctk.CTkFrame(parent, fg_color="transparent")
+        r.pack(fill="x", pady=(0, 4))
+        ctk.CTkLabel(r, text=label, width=110, anchor="w",
+                     font=FONT["small"], text_color=C["text_light"]).pack(side="left")
+        ctk.CTkEntry(r, textvariable=var, height=28,
+                     fg_color=C["input_bg"], border_color=C["input_border"],
+                     text_color=C["text"], corner_radius=6, font=FONT["small"]
+                     ).pack(side="left", fill="x", expand=True, padx=(4, 4))
+        ctk.CTkButton(r, text="...", width=28, height=28, corner_radius=6,
+                      fg_color=C["tab_bg"], text_color=C["text"],
+                      hover_color=C["primary_muted"], border_width=1,
+                      border_color=C["input_border"], font=FONT["small"],
+                      command=lambda: self._browse_dir_to(var)
+                      ).pack(side="left")
+
+    def _on_stories_create(self):
+        pic = self.as_pic_var.get().strip()
+        voice = self.as_voice_var.get().strip()
+        stock = self.as_stock_var.get().strip()
+        if not pic or not os.path.isdir(pic):
+            self._set_info("Thư mục Picture không hợp lệ!", C["red_light"], C["red"])
+            return
+        if not voice or not os.path.isdir(voice):
+            self._set_info("Thư mục Voice không hợp lệ!", C["red_light"], C["red"])
+            return
+        if not stock or not os.path.isdir(stock):
+            self._set_info("Thư mục Video stock không hợp lệ!", C["red_light"], C["red"])
+            return
+
+        capcut_path = self.app.capcut_path.get().strip()
+        if not capcut_path or not os.path.isdir(capcut_path):
+            self._set_info("CapCut path chưa cấu hình!", C["red_light"], C["red"])
+            return
+
+        try:
+            fps = int(self.as_fps_var.get())
+        except ValueError:
+            self._set_info("FPS không hợp lệ!", C["red_light"], C["red"])
+            return
+
+        ratio = self.as_ratio_var.get()
+        quality = self.as_quality_var.get()
+        prefix = self.as_prefix_var.get().strip()
+
+        confirm = messagebox.askokcancel(
+            "Tạo Auto Stories",
+            f"Ghép voice + ảnh + video stock nền (random).\n\n"
+            f"Tiền tố: {prefix or '(trống)'}\n"
+            f"{ratio} | {quality} | {fps}fps\n\n"
+            "Video stock phải >= số project (mỗi project 1 video không trùng),\n"
+            "nếu thiếu sẽ báo lỗi và không chạy.\n"
+            "Thoát CapCut trước khi tiếp tục.\nOK?"
+        )
+        if not confirm:
+            return
+
+        self.as_btn.configure(state="disabled", text="Đang tạo...")
+        self._set_info("Đang kiểm tra dữ liệu & tạo project...",
+                       C["primary_light"], C["primary"])
+        threading.Thread(
+            target=self._run_stories,
+            args=(pic, voice, stock, prefix, capcut_path, ratio, quality, fps),
+            daemon=True,
+        ).start()
+
+    def _run_stories(self, pic, voice, stock, prefix, capcut_path, ratio, quality, fps):
+        root = self.app.root
+
+        def cb(msg):
+            root.after(0, self._append_log, msg)
+
+        try:
+            r = ase.create_auto_stories(
+                picture_folder=pic, voice_folder=voice, stock_folder=stock,
+                prefix=prefix, capcut_path=capcut_path,
+                ratio=ratio, quality=quality, fps=fps, callback=cb,
+            )
+        except Exception:
+            import traceback
+            cb(f"[EXCEPTION] {traceback.format_exc()}")
+            r = ase.StoryResult(success=False, error="Exception khi tạo")
+
+        if not r.success:
+            cb(f"══ LỖI: {r.error} ══")
+            root.after(0, self._set_info, r.error, C["red_light"], C["red"])
+            root.after(0, lambda: self.as_btn.configure(
+                state="normal", text="Tạo Auto Stories"))
+            return
+
+        summary = f"Auto Stories: {r.created}/{r.total} tạo"
+        if r.failed:
+            summary += f", lỗi {len(r.failed)}"
+        if r.skipped_no_pic:
+            summary += f", bỏ {len(r.skipped_no_pic)} (thiếu ảnh)"
+        cb(f"══ {summary} ══")
+
+        if r.created > 0 and not r.failed:
+            bg, fg = C["green_light"], C["green"]
+        elif r.created == 0:
+            bg, fg = C["red_light"], C["red"]
+        else:
+            bg, fg = C["primary_light"], C["primary"]
+        root.after(0, self._set_info, summary, bg, fg)
+        root.after(0, lambda: self.as_btn.configure(
+            state="normal", text="Tạo Auto Stories"))
+        root.after(0, lambda: self.app.status_var.set(f"  {summary}"))
         if r.created > 0:
             root.after(0, self.app._load_projects)
 

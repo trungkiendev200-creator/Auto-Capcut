@@ -15,19 +15,19 @@ class TransitionInfo:
     effect_type: int = 19  # CapCut transition type
 
 
-def scan_library(capcut_path: str | None = None) -> list[TransitionInfo]:
+def scan_library(capcut_path: str | None = None,
+                 force: bool = False) -> list[TransitionInfo]:
     """Quét transition library. Fallback từ bundled JSON nếu cache trống."""
     if capcut_path is None:
         capcut_path = os.path.join(os.environ.get("LOCALAPPDATA", ""), "CapCut")
 
     all_trans: dict[str, TransitionInfo] = {}
 
-    cache_dir = os.path.join(capcut_path, "User Data", "Cache", "ressdk_db")
-    if os.path.isdir(cache_dir):
-        for db_folder in os.listdir(cache_dir):
-            db_path = os.path.join(cache_dir, db_folder, "rp.db")
-            if os.path.isfile(db_path):
-                _scan_db(db_path, all_trans)
+    from core import library_cache
+    for d in library_cache.get_raw(capcut_path, force=force)["transition"]:
+        rid = d.get("resource_id", "")
+        if rid and rid not in all_trans:
+            all_trans[rid] = TransitionInfo(**d)
 
     # Merge bundled JSON làm baseline: cache CapCut đã thêm trước, fallback
     # điền phần thiếu. Đảm bảo mọi máy đều thấy full library.

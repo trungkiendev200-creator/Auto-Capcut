@@ -209,6 +209,7 @@ def sync_to_audio(draft_path: str, log_fn=None) -> SyncAudioResult:
                 new_src_dur = max(1, int(old_src_dur * ratio))
                 s["target_timerange"] = {"start": ts, "duration": new_td}
                 s["source_timerange"]["duration"] = new_src_dur
+                capcut.rescale_segment_keyframes(s, td, new_td)
                 trimmed = True
                 new_segs.append(s)
             else:

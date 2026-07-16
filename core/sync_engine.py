@@ -77,6 +77,7 @@ def sync_project(
             mat_id = v_segs[i].get("material_id", "")
             mat_type = _get_material_type(data, mat_id)
             source_dur = v_segs[i]["source_timerange"]["duration"]
+            old_target_dur = v_segs[i]["target_timerange"]["duration"]
 
             # Set target timing = audio timing
             v_segs[i]["target_timerange"]["start"] = a_start
@@ -86,9 +87,16 @@ def sync_project(
             v_segs[i]["volume"] = 0.0
             v_segs[i]["last_nonzero_volume"] = 0.0
 
+            # Segment đã có keyframe: co giãn theo độ dài mới để không "chạy không hết"
+            has_kf = bool(v_segs[i].get("common_keyframes"))
+            if has_kf:
+                capcut.rescale_segment_keyframes(v_segs[i], old_target_dur, a_dur)
+
             if mat_type == "photo":
-                # Ảnh: chỉ thay đổi target, không cần xử lý speed/source
-                pass
+                # Ảnh: target đổi. Nếu có keyframe → sync source=target để CapCut
+                # tính keyframe đúng toàn bộ độ dài (keyframe theo source domain).
+                if has_kf:
+                    v_segs[i]["source_timerange"] = {"start": 0, "duration": a_dur}
             elif mat_type == "video":
                 if video_mode == VIDEO_MODE_SPEED:
                     # SPEED mode: giữ nguyên source_duration, tính speed mới

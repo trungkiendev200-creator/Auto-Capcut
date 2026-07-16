@@ -153,3 +153,27 @@ def get_material_type(data: dict, material_id: str) -> str:
         if v.get("id") == material_id:
             return v.get("type", "video")
     return "unknown"
+
+
+def rescale_segment_keyframes(seg: dict, old_dur: int, new_dur: int) -> bool:
+    """Co giãn time_offset của common_keyframes khi segment đổi độ dài.
+
+    Giữ keyframe phủ đúng tỉ lệ cũ (vd zoom full-duration vẫn phủ hết sau khi
+    resize). Nếu không làm, keyframe giữ offset cũ → chạy không hết / vượt quá.
+
+    Trả về True nếu có keyframe được chỉnh.
+    """
+    if old_dur <= 0 or new_dur <= 0 or old_dur == new_dur:
+        return False
+    groups = seg.get("common_keyframes") or []
+    if not groups:
+        return False
+    ratio = new_dur / old_dur
+    changed = False
+    for g in groups:
+        for p in g.get("keyframe_list", []):
+            if "time_offset" in p:
+                off = int(round(p["time_offset"] * ratio))
+                p["time_offset"] = min(off, int(new_dur))  # clamp trong segment
+                changed = True
+    return changed

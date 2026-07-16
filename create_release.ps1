@@ -29,7 +29,7 @@ if ($Token) {
 }
 
 $repo = $Repo
-$tag = "v1.23.0"
+$tag = "v1.24.0"
 $exePath = "dist\AutoCapCut.exe"
 
 if (-not (Test-Path $exePath)) { throw "Missing $exePath" }
@@ -43,15 +43,18 @@ $headers = @{
 
 $bodyText = @"
 ## Cap nhat
-- Doi "Ban Content" thanh "Import Data": import audio + anh/video (map theo SO ten file)
-  vao 1 project CapCut DA TAO SAN. Chi thay tracks/materials/duration, giu nguyen
-  id/canvas/fps/timeline cua project -> tranh main-track magnet hut don anh ve dau.
-- Thu muc "video edit" va "video intro" gio nhan ca ANH lan video (map theo so nhu nhau).
+- Them tab "Auto Stories" (trong Create Project 2): tao project ghep VOICE + ANH
+  (map theo TEN file trung) + VIDEO STOCK nen (random khong trung). Anh & video keo
+  dai = voice; video ngan hon -> lap, dai hon -> cat. Ten project = tien to + ten voice.
+- Toi uu khoi dong: cache library CapCut (gop 1 lan quet + luu dia) -> mo app nhanh
+  hon nhieu (~6s -> ~1s cac lan sau).
+- Fix keyframe "chay khong het": tu dong co gian keyframe theo do dai moi sau khi
+  Sync Audio / cat stock (tranh keyframe ket thuc som).
 "@
 
 $payload = @{
     tag_name = $tag
-    name = "v1.23.0 - Import Data (vao project co san) + anh trong video folder"
+    name = "v1.24.0 - Auto Stories + toi uu khoi dong + fix keyframe"
     body = $bodyText
     draft = $false
     prerelease = $false
