@@ -153,6 +153,7 @@ def cut_and_import_audio(
     cut_input_text: str,
     backup: bool = True,
     log_fn=None,
+    padding_us: int = 500_000,
 ) -> SyncSubResult:
     """
     Cắt video tại vị trí sau mỗi sub chỉ định, chèn audio + video nền vào.
@@ -245,8 +246,9 @@ def cut_and_import_audio(
     # Sort cuts theo sub_index tăng dần
     cuts.sort(key=lambda x: x[0])
 
-    PADDING_BEFORE = 500_000  # 0.5s trước audio
-    PADDING_AFTER = 500_000   # 0.5s sau audio
+    # Padding trước/sau audio (cấu hình từ UI; 0 = không đệm, narration sát điểm cắt)
+    PADDING_BEFORE = max(0, int(padding_us))
+    PADDING_AFTER = max(0, int(padding_us))
 
     # ── Phase 1: Thu thập thông tin tất cả cuts ──
     cut_infos = []  # (cut_time_original, insert_dur, audio_files, audio_durations)

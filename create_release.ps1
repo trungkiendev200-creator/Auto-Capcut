@@ -29,7 +29,7 @@ if ($Token) {
 }
 
 $repo = $Repo
-$tag = "v1.24.0"
+$tag = "v1.25.0"
 $exePath = "dist\AutoCapCut.exe"
 
 if (-not (Test-Path $exePath)) { throw "Missing $exePath" }
@@ -43,18 +43,16 @@ $headers = @{
 
 $bodyText = @"
 ## Cap nhat
-- Them tab "Auto Stories" (trong Create Project 2): tao project ghep VOICE + ANH
-  (map theo TEN file trung) + VIDEO STOCK nen (random khong trung). Anh & video keo
-  dai = voice; video ngan hon -> lap, dai hon -> cat. Ten project = tien to + ten voice.
-- Toi uu khoi dong: cache library CapCut (gop 1 lan quet + luu dia) -> mo app nhanh
-  hon nhieu (~6s -> ~1s cac lan sau).
-- Fix keyframe "chay khong het": tu dong co gian keyframe theo do dai moi sau khi
-  Sync Audio / cat stock (tranh keyframe ket thuc som).
+- 17 PROMAX quy trinh moi: bo Hook (4-hook.txt) va Intro (intro.mp3 / text intro.txt).
+  Chi con 4 buoc: Cut & Import Audio -> Delete SRT -> Sync Media -> Insert Picture.
+- Them tuy chon Padding (bat/tat + thoi gian giay) cho buoc Cut & Import Audio,
+  thay cho padding co dinh 0.5s. Tat -> narration sat diem cat.
+- PROMAX thuong giu nguyen (padding mac dinh 0.5s).
 "@
 
 $payload = @{
     tag_name = $tag
-    name = "v1.24.0 - Auto Stories + toi uu khoi dong + fix keyframe"
+    name = "v1.25.0 - 17 PROMAX quy trinh moi (bo hook/intro, padding tuy chon)"
     body = $bodyText
     draft = $false
     prerelease = $false

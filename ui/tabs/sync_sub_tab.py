@@ -6,7 +6,7 @@ import customtkinter as ctk
 from tkinter import filedialog, messagebox
 
 from ui.theme import COLORS as C, FONT
-from core import sync_sub_engine, capcut, track_image_engine, hook_intro_engine
+from core import sync_sub_engine, capcut, track_image_engine
 
 
 class SyncSubTab:
@@ -1161,13 +1161,31 @@ class SyncSubTab:
             fg_color=C["primary"], hover_color=C["primary_hover"],
         ).pack(side="left", padx=(12, 0))
 
+        # Padding (tùy chọn) — đệm 2 bên narration tại điểm cắt
+        r4 = ctk.CTkFrame(f, fg_color="transparent")
+        r4.pack(fill="x", pady=(0, 4))
+        self.p17_padding_var = tk.BooleanVar(value=True)
+        ctk.CTkCheckBox(
+            r4, text="Padding", variable=self.p17_padding_var,
+            font=FONT["small"], text_color=C["text_light"],
+            checkbox_width=16, checkbox_height=16,
+            fg_color=C["primary"], hover_color=C["primary_hover"],
+        ).pack(side="left")
+        ctk.CTkLabel(r4, text="Thời gian (giây):", font=FONT["small"],
+                     text_color=C["text_light"]).pack(side="left", padx=(12, 4))
+        self.p17_padding_sec_var = ctk.StringVar(value="0.25")
+        ctk.CTkEntry(r4, textvariable=self.p17_padding_sec_var, height=28, width=70,
+                     fg_color=C["input_bg"], border_color=C["input_border"],
+                     text_color=C["text"], corner_radius=6, font=FONT["small"]
+                     ).pack(side="left")
+
         info_text = (
-            "Giống PROMAX nhưng MỖI subfolder thêm:\n"
-            "  • 4-hook.txt  (mỗi dòng = 1 hook range, vd 13-15)\n"
-            "  • intro.mp3  (file audio intro)\n"
-            "  • text intro.txt  (tùy chọn — text intro, track riêng trùng vị trí audio intro)\n"
-            "Quy trình: chạy PROMAX → snapshot hook → prepend [hook + filler + "
-            "intro.mp3 + intro_text] vào đầu timeline."
+            "Quy trình mới (bỏ hook / intro / text intro):\n"
+            "  [1] Cut & Import Audio (1-insert-radio.txt + narration/) — có padding tùy chọn\n"
+            "  [2] Delete SRT (2-delete-narration.txt)\n"
+            "  [3] Sync Media @speed (cắt random video gốc)\n"
+            "  [4] Insert Picture (3-insert-law-picture.txt + law picture/)\n"
+            "Project cần có SRT sẵn. Padding tắt → narration sát điểm cắt."
         )
         ctk.CTkLabel(f, text=info_text, font=("Segoe UI", 10),
                      text_color=C["text_light"], justify="left", wraplength=520
@@ -1187,26 +1205,8 @@ class SyncSubTab:
             var.set(path)
 
     def _validate_17promax_data(self, selected, parent_folder):
-        # Reuse promax validation + thêm 4-hook.txt + intro.mp3
-        errors = self._validate_promax_data(selected, parent_folder)
-        for _, draft in selected:
-            name = draft.get("draft_name", "?")
-            sub = os.path.join(parent_folder, name)
-            if not os.path.isdir(sub):
-                continue
-            hook_file = os.path.join(sub, "4-hook.txt")
-            intro_file = os.path.join(sub, "intro.mp3")
-            if not os.path.isfile(hook_file):
-                errors.append(f"[{name}] Thiếu: 4-hook.txt")
-            else:
-                try:
-                    if not self._read_text(hook_file).strip():
-                        errors.append(f"[{name}] File trống: 4-hook.txt")
-                except Exception as e:
-                    errors.append(f"[{name}] Không đọc được 4-hook.txt: {e}")
-            if not os.path.isfile(intro_file):
-                errors.append(f"[{name}] Thiếu: intro.mp3")
-        return errors
+        # Quy trình mới: bỏ hook/intro → dùng chung validate PROMAX
+        return self._validate_promax_data(selected, parent_folder)
 
     def _on_run_17promax(self):
         try:
@@ -1234,6 +1234,18 @@ class SyncSubTab:
 
             add_anim = self.p17_anim_var.get()
 
+            # Padding tùy chọn (giây → microseconds); tắt → 0
+            if self.p17_padding_var.get():
+                try:
+                    padding_us = int(float(self.p17_padding_sec_var.get()) * 1_000_000)
+                    if padding_us < 0:
+                        raise ValueError
+                except ValueError:
+                    self._set_info("Padding (giây) không hợp lệ!", C["red_light"], C["red"])
+                    return
+            else:
+                padding_us = 0
+
             errors = self._validate_17promax_data(selected, parent_folder)
             if errors:
                 self._append_log("[17 PROMAX VALIDATE] Data không hợp lệ:")
@@ -1249,10 +1261,12 @@ class SyncSubTab:
 
             names = [d.get("draft_name", "?") for _, d in selected]
             preview = ", ".join(names[:5]) + ("..." if len(names) > 5 else "")
+            pad_label = f"{padding_us / 1_000_000:g}s" if padding_us > 0 else "OFF"
             confirm = messagebox.askokcancel(
                 "17 PROMAX",
                 f"Validate OK. Chạy {len(selected)} project:\n{preview}\n\n"
-                f"Speed: {speed}x | Animation: {'ON' if add_anim else 'OFF'}\n\n"
+                f"Speed: {speed}x | Animation: {'ON' if add_anim else 'OFF'} | "
+                f"Padding: {pad_label}\n\n"
                 "Thoát CapCut trước khi tiếp tục.\nOK?"
             )
             if not confirm:
@@ -1264,7 +1278,7 @@ class SyncSubTab:
 
             threading.Thread(
                 target=self._run_17promax,
-                args=(selected, parent_folder, bg_video, speed, add_anim),
+                args=(selected, parent_folder, bg_video, speed, add_anim, padding_us),
                 daemon=True,
             ).start()
         except Exception as e:
@@ -1272,7 +1286,8 @@ class SyncSubTab:
             self._append_log(f"[17 PROMAX] EXCEPTION: {traceback.format_exc()}")
             self._set_info(f"Error: {e}", C["red_light"], C["red"])
 
-    def _run_17promax(self, selected, parent_folder, bg_video, speed, add_anim):
+    def _run_17promax(self, selected, parent_folder, bg_video, speed, add_anim,
+                      padding_us=0):
         root = self.app.root
         _log = self._make_log_fn()
 
@@ -1302,48 +1317,26 @@ class SyncSubTab:
             cut_file = os.path.join(sub_folder, "1-insert-radio.txt")
             delete_file = os.path.join(sub_folder, "2-delete-narration.txt")
             pic_file = os.path.join(sub_folder, "3-insert-law-picture.txt")
-            hook_file = os.path.join(sub_folder, "4-hook.txt")
-            intro_file = os.path.join(sub_folder, "intro.mp3")
-            intro_txt_file = os.path.join(sub_folder, "text intro.txt")
 
             try:
                 cut_text = self._read_text(cut_file)
                 delete_text = self._read_text(delete_file)
                 pic_text = self._read_text(pic_file)
-                hook_text = self._read_text(hook_file)
-                intro_text = self._read_text(intro_txt_file) if os.path.isfile(intro_txt_file) else ""
             except Exception as e:
                 _log(f"  FAIL: read txt error: {e}")
                 root.after(0, self.app.project_list.set_status, idx, "Fail", C["red"])
                 fail_count += 1
                 continue
 
-            # ── PRE: snapshot hook ──
-            _log(f"  [0/5] Snapshot hook")
-            hook_ranges = hook_intro_engine.parse_hook_input(hook_text)
-            if not hook_ranges:
-                _log(f"    FAIL: 4-hook.txt rỗng hoặc không parse được")
-                root.after(0, self.app.project_list.set_status, idx, "Fail", C["red"])
-                fail_count += 1
-                continue
-            try:
-                snap = hook_intro_engine.snapshot_hook(draft_path, hook_ranges)
-                _log(f"    OK: {len(hook_ranges)} hook range(s), tổng "
-                     f"{sum(r[1] for r in snap.hook_ranges)/1_000_000:.1f}s")
-            except Exception as e:
-                _log(f"    FAIL: snapshot: {e}")
-                root.after(0, self.app.project_list.set_status, idx, "Fail", C["red"])
-                fail_count += 1
-                continue
-
             project_ok = True
 
-            # ── PROMAX 4 steps ──
-            _log(f"  [1/5] Cut & Import Audio")
+            # ── 4 bước (quy trình mới, không hook/intro) ──
+            _log(f"  [1/4] Cut & Import Audio (padding="
+                 f"{padding_us/1_000_000:g}s)")
             try:
                 r = sync_sub_engine.cut_and_import_audio(
                     draft_path, narration_folder, bg_video, cut_text,
-                    backup=True, log_fn=_log
+                    backup=True, log_fn=_log, padding_us=padding_us
                 )
                 if not r.success:
                     _log(f"    FAIL: {r.message}")
@@ -1357,7 +1350,7 @@ class SyncSubTab:
 
             if project_ok:
                 if delete_text.strip():
-                    _log(f"  [2/5] Xóa SRT")
+                    _log(f"  [2/4] Xóa SRT")
                     try:
                         r = sync_sub_engine.delete_srt_and_cut(
                             draft_path, delete_text, backup=True, log_fn=_log
@@ -1372,10 +1365,10 @@ class SyncSubTab:
                         _log(f"    EXCEPTION: {traceback.format_exc()}")
                         project_ok = False
                 else:
-                    _log(f"  [2/5] Xóa SRT: file trống, bỏ qua")
+                    _log(f"  [2/4] Xóa SRT: file trống, bỏ qua")
 
             if project_ok:
-                _log(f"  [3/5] Sync Media @{speed}x")
+                _log(f"  [3/4] Sync Media @{speed}x")
                 try:
                     r = sync_sub_engine.sync_media_sub(
                         draft_path, speed=speed, backup=True, log_fn=_log
@@ -1391,28 +1384,11 @@ class SyncSubTab:
                     project_ok = False
 
             if project_ok:
-                _log(f"  [4/5] Insert Picture")
+                _log(f"  [4/4] Insert Picture")
                 try:
                     r = sync_sub_engine.insert_picture_law(
                         draft_path, picture_folder, pic_text,
                         add_animation=add_anim, backup=True, log_fn=_log
-                    )
-                    if not r.success:
-                        _log(f"    FAIL: {r.message}")
-                        project_ok = False
-                    else:
-                        _log(f"    OK: {r.message}")
-                except Exception as e:
-                    import traceback
-                    _log(f"    EXCEPTION: {traceback.format_exc()}")
-                    project_ok = False
-
-            # ── POST: prepend hook + intro ──
-            if project_ok:
-                _log(f"  [5/5] Prepend hook + intro")
-                try:
-                    r = hook_intro_engine.prepend_hook_and_intro(
-                        draft_path, snap, intro_file, intro_text=intro_text
                     )
                     if not r.success:
                         _log(f"    FAIL: {r.message}")
