@@ -29,7 +29,7 @@ if ($Token) {
 }
 
 $repo = $Repo
-$tag = "v1.25.0"
+$tag = "v1.26.0"
 $exePath = "dist\AutoCapCut.exe"
 
 if (-not (Test-Path $exePath)) { throw "Missing $exePath" }
@@ -43,16 +43,19 @@ $headers = @{
 
 $bodyText = @"
 ## Cap nhat
-- 17 PROMAX quy trinh moi: bo Hook (4-hook.txt) va Intro (intro.mp3 / text intro.txt).
-  Chi con 4 buoc: Cut & Import Audio -> Delete SRT -> Sync Media -> Insert Picture.
-- Them tuy chon Padding (bat/tat + thoi gian giay) cho buoc Cut & Import Audio,
-  thay cho padding co dinh 0.5s. Tat -> narration sat diem cat.
-- PROMAX thuong giu nguyen (padding mac dinh 0.5s).
+Auto Stories gio dung project giong het mau "brazil stories01":
+
+- Hieu ung "Khung phim 1" ap len MOI segment video (ca video stock nen lan anh).
+- Anh overlay: zoom con 85%, nam o track overlay, co mask "Cuon phim"
+  (Lam mo vien 100). Mask luu theo ti le nen tu bam full chieu cao tung anh.
+- Them sticker Subscribe o goc duoi-phai, dai bang ca project.
+- Them 3 checkbox trong tab Auto Stories de bat/tat tung phan (mac dinh bat het).
+- Bo han chuc nang import caption tu file .srt.
 "@
 
 $payload = @{
     tag_name = $tag
-    name = "v1.25.0 - 17 PROMAX quy trinh moi (bo hook/intro, padding tuy chon)"
+    name = "v1.26.0 - Auto Stories dung theo mau brazil stories01"
     body = $bodyText
     draft = $false
     prerelease = $false
