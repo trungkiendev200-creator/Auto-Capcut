@@ -486,7 +486,8 @@ class CreateProject2Tab:
             f,
             text="Ghép VOICE + ẢNH (map theo TÊN file trùng) + VIDEO STOCK nền (random không trùng).\n"
                  "Ảnh & video kéo dài = voice; video ngắn hơn → lặp, dài hơn → cắt. "
-                 "Tên project = Tiền tố + tên voice (vd: brazil stories video21).",
+                 "Tên project = Tiền tố + tên voice (vd: brazil stories video21).\n"
+                 "Style dựng theo project mẫu \"brazil stories01\" (chọn bên dưới).",
             font=("Segoe UI", 10), text_color=C["text_light"],
             justify="left", wraplength=560,
         ).pack(anchor="w", pady=(0, 8))
@@ -547,6 +548,28 @@ class CreateProject2Tab:
                           text_color=C["text"], font=FONT["small"]
                           ).pack(side="left", padx=(4, 0))
 
+        # Style card (theo project mẫu "brazil stories01")
+        stl = ctk.CTkFrame(f, fg_color=C["primary_light"], corner_radius=6)
+        stl.pack(fill="x", pady=(0, 8))
+        ctk.CTkLabel(stl, text="Style (theo project mẫu):", font=FONT["small"],
+                     text_color=C["text"]).pack(anchor="w", padx=10, pady=(8, 0))
+        sb = ctk.CTkFrame(stl, fg_color="transparent")
+        sb.pack(fill="x", padx=10, pady=(2, 8))
+
+        self.as_effect_var = ctk.BooleanVar(value=True)
+        self.as_mask_var = ctk.BooleanVar(value=True)
+        self.as_sticker_var = ctk.BooleanVar(value=True)
+        for text, var in (
+            ('Hiệu ứng "Khung phim 1" (stock + ảnh)', self.as_effect_var),
+            ('Mask "Cuộn phim" + ảnh zoom 85%', self.as_mask_var),
+            ("Sticker Subscribe (góc dưới-phải)", self.as_sticker_var),
+        ):
+            ctk.CTkCheckBox(sb, text=text, variable=var,
+                            font=FONT["small"], text_color=C["text"],
+                            checkbox_width=18, checkbox_height=18,
+                            corner_radius=4, fg_color=C["primary"],
+                            hover_color=C["primary"]).pack(anchor="w", pady=1)
+
         self.as_btn = ctk.CTkButton(
             f, text="Tạo Auto Stories", height=36, corner_radius=8,
             fg_color=C["accent"], hover_color="#7c3aed",
@@ -600,11 +623,21 @@ class CreateProject2Tab:
         quality = self.as_quality_var.get()
         prefix = self.as_prefix_var.get().strip()
 
+        style = ase.StoryStyle(
+            film_effect=self.as_effect_var.get(),
+            photo_mask=self.as_mask_var.get(),
+            sticker=self.as_sticker_var.get(),
+        )
+        style_on = [n for n, v in (("Khung phim 1", style.film_effect),
+                                   ("Mask cuộn phim + zoom 85%", style.photo_mask),
+                                   ("Sticker Subscribe", style.sticker)) if v]
+
         confirm = messagebox.askokcancel(
             "Tạo Auto Stories",
             f"Ghép voice + ảnh + video stock nền (random).\n\n"
             f"Tiền tố: {prefix or '(trống)'}\n"
-            f"{ratio} | {quality} | {fps}fps\n\n"
+            f"{ratio} | {quality} | {fps}fps\n"
+            f"Style: {', '.join(style_on) if style_on else '(không)'}\n\n"
             "Video stock phải >= số project (mỗi project 1 video không trùng),\n"
             "nếu thiếu sẽ báo lỗi và không chạy.\n"
             "Thoát CapCut trước khi tiếp tục.\nOK?"
@@ -617,11 +650,12 @@ class CreateProject2Tab:
                        C["primary_light"], C["primary"])
         threading.Thread(
             target=self._run_stories,
-            args=(pic, voice, stock, prefix, capcut_path, ratio, quality, fps),
+            args=(pic, voice, stock, prefix, capcut_path, ratio, quality, fps, style),
             daemon=True,
         ).start()
 
-    def _run_stories(self, pic, voice, stock, prefix, capcut_path, ratio, quality, fps):
+    def _run_stories(self, pic, voice, stock, prefix, capcut_path, ratio, quality,
+                     fps, style):
         root = self.app.root
 
         def cb(msg):
@@ -631,7 +665,7 @@ class CreateProject2Tab:
             r = ase.create_auto_stories(
                 picture_folder=pic, voice_folder=voice, stock_folder=stock,
                 prefix=prefix, capcut_path=capcut_path,
-                ratio=ratio, quality=quality, fps=fps, callback=cb,
+                ratio=ratio, quality=quality, fps=fps, style=style, callback=cb,
             )
         except Exception:
             import traceback

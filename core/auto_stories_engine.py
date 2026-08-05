@@ -1,8 +1,9 @@
 """Auto Stories — tạo project ghép VOICE + ẢNH (map theo tên) + VIDEO STOCK nền (random).
 
-Bố cục mỗi project:
+Bố cục mỗi project (dựng theo project mẫu "brazil stories01"):
     Track dưới (main): VIDEO STOCK nền — cover full khung, tắt tiếng, lấp/cắt = voice.
-    Track trên (overlay): ẢNH — fit vừa khung, canh giữa, dài = voice.
+    Track trên (overlay, flag=2): ẢNH — canh giữa, scale 0.85, dài = voice.
+    Track sticker: Subscribe ở góc dưới-phải, dài = toàn bộ project.
     Track audio: VOICE — dài = toàn bộ project.
 
 Quy tắc:
@@ -12,6 +13,11 @@ Quy tắc:
     - Nếu số video stock < số project cần tạo → CẢNH BÁO và KHÔNG chạy.
     - Video stock ngắn hơn voice → lặp lại (cắt nối, speed 1.0); dài hơn → cắt.
     - Tên project = "<tiền tố> <tên voice>" (vd "brazil stories video21").
+
+Style (bật/tắt qua StoryStyle, mặc định BẬT hết — xem core/story_style.py):
+    - Hiệu ứng "Khung phim 1" trên MỌI segment video (stock + ảnh).
+    - Mask "Cuộn phim" + scale 0.85 trên segment ảnh.
+    - Sticker "INTERACTION ICONS EN SUBSCRIBE".
 """
 
 import os
@@ -20,10 +26,19 @@ from dataclasses import dataclass, field
 
 from core import create_project as cp
 from core import create_bck_engine as bck
+from core import story_style as ss
 
 
 VIDEO_EXTS = cp.VIDEO_EXTS | {".m4v", ".webm"}
 PHOTO_MATERIAL_DUR = 10800000000  # duration "vô hạn" của material ảnh (giống create_project)
+
+
+@dataclass
+class StoryStyle:
+    """Bật/tắt các thành phần style lấy từ project mẫu "brazil stories01"."""
+    film_effect: bool = True    # hiệu ứng "Khung phim 1" trên mọi segment video
+    photo_mask: bool = True     # mask "Cuộn phim" + scale 0.85 trên ảnh
+    sticker: bool = True        # sticker Subscribe góc dưới-phải
 
 
 @dataclass
@@ -139,8 +154,10 @@ def _stock_duration(path: str) -> int:
 
 def _build_one(voice_path: str, pic_path: str, stock_path: str,
                project_name: str, capcut_path: str,
-               ratio: str, quality: str, fps: int) -> tuple[str, int]:
+               ratio: str, quality: str, fps: int,
+               style: StoryStyle | None = None) -> tuple[str, int]:
     """Dựng + lưu 1 project. Trả về (project_folder, voice_dur)."""
+    style = style or StoryStyle()
     voice_dur = cp._get_audio_duration(voice_path)
     stock_dur = _stock_duration(stock_path)
 
@@ -152,21 +169,31 @@ def _build_one(voice_path: str, pic_path: str, stock_path: str,
     # 1. Video stock nền (main track)
     bg_segs = _add_bg_stock(M, stock_path, stock_dur, voice_dur, cover, mute=True)
 
-    # 2. Ảnh overlay (render đè lên trên)
+    # 2. Ảnh overlay (render đè lên trên) — track flag=2 như project mẫu
     pic_seg = _add_picture(M, pic_path, voice_dur)
-    pic_seg["render_index"] = 100
+    pic_seg["render_index"] = 1
+    pic_seg["track_render_index"] = 1
 
     # 3. Voice (audio track)
     audio_seg = bck._add_audio_clip(M, voice_path, voice_dur, 0)
 
+    # 4. Style theo project mẫu "brazil stories01"
+    if style.film_effect:
+        ss.apply_film_effect(M, bg_segs + [pic_seg])
+    if style.photo_mask:
+        pic_seg["clip"]["scale"] = {"x": ss.PHOTO_SCALE, "y": ss.PHOTO_SCALE}
+        ss.apply_film_mask(M, pic_seg)
+
     tracks = [
         {"id": cp._uid(), "type": "video", "segments": bg_segs, "flag": 0,
          "attribute": 0, "name": "", "is_default_name": True},
-        {"id": cp._uid(), "type": "video", "segments": [pic_seg], "flag": 0,
-         "attribute": 0, "name": "", "is_default_name": True},
-        {"id": cp._uid(), "type": "audio", "segments": [audio_seg], "flag": 0,
+        {"id": cp._uid(), "type": "video", "segments": [pic_seg], "flag": 2,
          "attribute": 0, "name": "", "is_default_name": True},
     ]
+    if style.sticker:
+        tracks.append(ss.add_sticker_track(M, int(voice_dur)))
+    tracks.append({"id": cp._uid(), "type": "audio", "segments": [audio_seg],
+                   "flag": 0, "attribute": 0, "name": "", "is_default_name": True})
 
     project_id = cp._uid()
     draft = cp.build_draft_content(project_id, project_name, fps,
@@ -180,11 +207,13 @@ def _build_one(voice_path: str, pic_path: str, stock_path: str,
 def create_auto_stories(picture_folder: str, voice_folder: str, stock_folder: str,
                         prefix: str, capcut_path: str,
                         ratio: str = "16:9", quality: str = "1080p", fps: int = 30,
+                        style: StoryStyle | None = None,
                         callback=None) -> StoryResult:
     def log(m):
         if callback:
             callback(m)
 
+    style = style or StoryStyle()
     res = StoryResult()
 
     voices = _list_files(voice_folder, cp.AUDIO_EXTS)
@@ -237,8 +266,12 @@ def create_auto_stories(picture_folder: str, voice_folder: str, stock_folder: st
 
     prefix = (prefix or "").strip()
 
+    on = [n for n, v in (("Khung phim 1", style.film_effect),
+                         ("Mask cuộn phim + scale 0.85", style.photo_mask),
+                         ("Sticker Subscribe", style.sticker)) if v]
     log(f"Bắt đầu: {len(pairs)} project | stock={len(stocks)} | "
         f"bỏ qua (thiếu ảnh)={len(res.skipped_no_pic)}")
+    log("Style: " + (", ".join(on) if on else "(không áp style nào)"))
 
     for i, (voice, pic, st) in enumerate(pairs):
         stock = stock_pool[i]
@@ -247,7 +280,7 @@ def create_auto_stories(picture_folder: str, voice_folder: str, stock_folder: st
             f"pic={os.path.basename(pic)}, stock={os.path.basename(stock)}]")
         try:
             _, vdur = _build_one(voice, pic, stock, name, capcut_path,
-                                 ratio, quality, fps)
+                                 ratio, quality, fps, style=style)
             res.created += 1
             res.created_names.append(name)
             log(f"   OK  dur={vdur / 1_000_000 / 60:.1f} phút")
