@@ -29,7 +29,7 @@ if ($Token) {
 }
 
 $repo = $Repo
-$tag = "v1.26.0"
+$tag = "v1.27.0"
 $exePath = "dist\AutoCapCut.exe"
 
 if (-not (Test-Path $exePath)) { throw "Missing $exePath" }
@@ -43,19 +43,18 @@ $headers = @{
 
 $bodyText = @"
 ## Cap nhat
-Auto Stories gio dung project giong het mau "brazil stories01":
+Canvas Blur (tab Create Project 2 -> Manhwa) gio chon duoc 4 muc mo:
 
-- Hieu ung "Khung phim 1" ap len MOI segment video (ca video stock nen lan anh).
-- Anh overlay: zoom con 85%, nam o track overlay, co mask "Cuon phim"
-  (Lam mo vien 100). Mask luu theo ti le nen tu bam full chieu cao tung anh.
-- Them sticker Subscribe o goc duoi-phai, dai bang ca project.
-- Them 3 checkbox trong tab Auto Stories de bat/tat tung phan (mac dinh bat het).
-- Bo han chuc nang import caption tu file .srt.
+- Them dropdown mask1 / mask2 / mask3 / mask4 canh checkbox Canvas Blur.
+  mask1 mo nhe nhat -> mask4 mo nhat, dung theo thu tu 4 o Nen -> Mo trong CapCut.
+- Dropdown tu xam khi checkbox Canvas Blur dang tat.
+- Hop xac nhan hien ten mask dang chon thay vi chi ON/OFF.
+- Mac dinh la mask1, trung dung muc mo cu -> ai dang dung khong thay khac gi.
 "@
 
 $payload = @{
     tag_name = $tag
-    name = "v1.26.0 - Auto Stories dung theo mau brazil stories01"
+    name = "v1.27.0 - Canvas Blur co 4 muc mask1-mask4"
     body = $bodyText
     draft = $false
     prerelease = $false
