@@ -27,6 +27,21 @@ QUALITY_PRESETS = {
     "4K": (3840, 2160),
 }
 
+# 4 mức Canvas Blur — trích từ project mẫu "demo" (Nền → Mờ, 4 ô theo thứ tự
+# trái sang phải trong CapCut). mask1 nhẹ nhất, mask4 mờ nhất.
+CANVAS_BLUR_MASKS = {
+    "mask1": 0.0625,
+    "mask2": 0.375,
+    "mask3": 0.75,
+    "mask4": 1.0,
+}
+DEFAULT_BLUR_MASK = "mask1"
+
+
+def blur_level(blur_mask: str) -> float:
+    """Đổi tên mask → giá trị blur. Tên lạ → mask1 (mức mặc định cũ)."""
+    return CANVAS_BLUR_MASKS.get(blur_mask, CANVAS_BLUR_MASKS[DEFAULT_BLUR_MASK])
+
 
 @dataclass
 class CreateConfig:
@@ -237,12 +252,13 @@ def _make_speed_material() -> dict:
     return {"id": _uid(), "type": "speed", "mode": 0, "speed": 1.0, "curve_speed": None}
 
 
-def _make_canvas_material(canvas_blur: bool = False) -> dict:
+def _make_canvas_material(canvas_blur: bool = False,
+                          blur_mask: str = DEFAULT_BLUR_MASK) -> dict:
     if canvas_blur:
         # Match CapCut native "Canvas → Blur" schema
         return {
             "id": _uid(), "type": "canvas_blur",
-            "color": "", "blur": 0.0625, "image": "",
+            "color": "", "blur": blur_level(blur_mask), "image": "",
             "album_image": "", "image_id": "", "image_name": "",
             "source_platform": 0, "team_id": "",
         }
@@ -584,6 +600,7 @@ def create_project(
     media_files_override: list[str] | None = None,
     audio_files_override: list[str] | None = None,
     canvas_blur: bool = False,
+    blur_mask: str = DEFAULT_BLUR_MASK,
 ) -> CreateResult:
     """Tạo project CapCut mới.
 
@@ -591,6 +608,7 @@ def create_project(
         media_files_override: nếu truyền vào, bỏ qua scan media_folder và dùng list này.
         audio_files_override: nếu truyền vào, bỏ qua scan audio_folder và dùng list này.
         canvas_blur: True = canvas của mọi segment dùng "blur" thay vì "color".
+        blur_mask: mức mờ khi canvas_blur=True — "mask1".."mask4" (xem CANVAS_BLUR_MASKS).
     """
     # Scan media files (hoặc dùng override)
     if media_files_override is not None:
@@ -631,7 +649,7 @@ def create_project(
 
         speed = _make_speed_material()
         speed_materials.append(speed)
-        cnv = _make_canvas_material(canvas_blur=canvas_blur)
+        cnv = _make_canvas_material(canvas_blur=canvas_blur, blur_mask=blur_mask)
         canvas_materials.append(cnv)
         snd = _make_sound_channel()
         sound_channels.append(snd)
@@ -882,6 +900,7 @@ def batch_create_manhwa_projects(
     quality: str = "1080p",
     fps: int = 30,
     canvas_blur: bool = False,
+    blur_mask: str = DEFAULT_BLUR_MASK,
     callback=None,
 ) -> BatchResult:
     """Tạo project Manhwa: mỗi cặp (subfolder ảnh, file video) → 1 project.
@@ -990,6 +1009,7 @@ def batch_create_manhwa_projects(
             media_files_override=images,
             audio_files_override=[],
             canvas_blur=canvas_blur,
+            blur_mask=blur_mask,
         )
         if not r.success:
             msg = f"FAIL '{name}' create: {r.message}"

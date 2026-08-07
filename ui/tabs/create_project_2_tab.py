@@ -338,17 +338,33 @@ class CreateProject2Tab:
                           text_color=C["text"], font=FONT["small"]
                           ).pack(side="left", padx=(4, 0))
 
-        # Canvas Blur checkbox
+        # Canvas Blur checkbox + chọn mức mờ (mask1..mask4)
         r_blur = ctk.CTkFrame(f, fg_color="transparent")
         r_blur.pack(fill="x", pady=(0, 8))
         self.mh_canvas_blur_var = tk.BooleanVar(value=False)
         ctk.CTkCheckBox(
             r_blur, text="Canvas Blur (apply to all images)",
             variable=self.mh_canvas_blur_var,
+            command=self._on_blur_toggle,
             font=FONT["small"], text_color=C["text"],
             checkbox_width=16, checkbox_height=16,
             fg_color=C["primary"], hover_color=C["primary_hover"],
         ).pack(side="left")
+
+        self.mh_blur_mask_var = ctk.StringVar(value=cp.DEFAULT_BLUR_MASK)
+        self.mh_blur_mask_menu = ctk.CTkOptionMenu(
+            r_blur, variable=self.mh_blur_mask_var,
+            values=list(cp.CANVAS_BLUR_MASKS.keys()),
+            width=80, height=26, corner_radius=6,
+            fg_color=C["card"], button_color=C["primary"],
+            text_color=C["text"], font=FONT["small"],
+        )
+        self.mh_blur_mask_menu.pack(side="left", padx=(10, 0))
+        self.mh_blur_hint = ctk.CTkLabel(
+            r_blur, text="mask1 mờ nhẹ nhất → mask4 mờ nhất",
+            font=("Segoe UI", 9), text_color=C["text_light"])
+        self.mh_blur_hint.pack(side="left", padx=(8, 0))
+        self._on_blur_toggle()
 
         self.mh_btn = ctk.CTkButton(
             f, text="Tạo dự án và xuất âm thanh", height=36, corner_radius=8,
@@ -357,6 +373,13 @@ class CreateProject2Tab:
             command=self._on_manhwa_create
         )
         self.mh_btn.pack(fill="x")
+
+    def _on_blur_toggle(self):
+        """Chỉ cho chọn mức mờ khi Canvas Blur đang bật."""
+        on = self.mh_canvas_blur_var.get()
+        self.mh_blur_mask_menu.configure(state="normal" if on else "disabled")
+        self.mh_blur_hint.configure(
+            text_color=C["text_light"] if on else C["input_border"])
 
     def _browse_dir_to(self, var):
         path = filedialog.askdirectory()
@@ -395,6 +418,7 @@ class CreateProject2Tab:
         ratio = self.mh_ratio_var.get()
         quality = self.mh_quality_var.get()
         canvas_blur = self.mh_canvas_blur_var.get()
+        blur_mask = self.mh_blur_mask_var.get()
 
         # Quick scan to show count in confirm dialog
         try:
@@ -419,7 +443,7 @@ class CreateProject2Tab:
             f"{len(matched)} matched pair(s):\n"
             f"{', '.join(matched[:5])}{'...' if len(matched) > 5 else ''}\n\n"
             f"Image duration: {img_dur}s | {ratio} | {quality} | {fps}fps\n"
-            f"Canvas Blur: {'ON' if canvas_blur else 'OFF'}\n\n"
+            f"Canvas Blur: {blur_mask if canvas_blur else 'OFF'}\n\n"
             "Project trùng tên sẽ skip.\n"
             "Thoát CapCut trước khi tiếp tục.\nOK?"
         )
@@ -432,11 +456,13 @@ class CreateProject2Tab:
 
         threading.Thread(
             target=self._run_manhwa,
-            args=(pic, vid, capcut_path, img_dur, ratio, quality, fps, canvas_blur),
+            args=(pic, vid, capcut_path, img_dur, ratio, quality, fps,
+                  canvas_blur, blur_mask),
             daemon=True,
         ).start()
 
-    def _run_manhwa(self, pic, vid, capcut_path, img_dur, ratio, quality, fps, canvas_blur):
+    def _run_manhwa(self, pic, vid, capcut_path, img_dur, ratio, quality, fps,
+                    canvas_blur, blur_mask):
         root = self.app.root
 
         def cb(msg):
@@ -452,6 +478,7 @@ class CreateProject2Tab:
                 quality=quality,
                 fps=fps,
                 canvas_blur=canvas_blur,
+                blur_mask=blur_mask,
                 callback=cb,
             )
         except Exception as e:
