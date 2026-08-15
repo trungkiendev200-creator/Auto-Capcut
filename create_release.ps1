@@ -29,7 +29,7 @@ if ($Token) {
 }
 
 $repo = $Repo
-$tag = "v1.27.0"
+$tag = "v1.28.0"
 $exePath = "dist\AutoCapCut.exe"
 
 if (-not (Test-Path $exePath)) { throw "Missing $exePath" }
@@ -43,18 +43,28 @@ $headers = @{
 
 $bodyText = @"
 ## Cap nhat
-Canvas Blur (tab Create Project 2 -> Manhwa) gio chon duoc 4 muc mo:
 
-- Them dropdown mask1 / mask2 / mask3 / mask4 canh checkbox Canvas Blur.
-  mask1 mo nhe nhat -> mask4 mo nhat, dung theo thu tu 4 o Nen -> Mo trong CapCut.
-- Dropdown tu xam khi checkbox Canvas Blur dang tat.
-- Hop xac nhan hien ten mask dang chon thay vi chi ON/OFF.
-- Mac dinh la mask1, trung dung muc mo cu -> ai dang dung khong thay khac gi.
+### Them tab BDC (trong VIP5AE)
+Chay 4 buoc giong 17 PROMAX, khac duy nhat cach map anh law:
+- KHONG can file 3-insert-law-picture.txt nua.
+- Anh dat ten bang so = so narration: 03.png -> audio 3, 20.png -> audio 20.
+- Bo qua anh ten khong phai so, canh bao khi 2 anh trung so audio.
+
+### On dinh hon cho 17 PROMAX
+- Buoc Xoa SRT: go lo so o cuoi dai (vd 584-592 khi chi co 591 sub) gio chi
+  BO QUA so thua kem canh bao, thay vi bao loi va bo ca project.
+- Them preflight: kiem tra input ca 4 buoc TRUOC khi ghi. Sai thi bo qua
+  project va KHONG dung vao draft, tranh tinh trang lam do dang (da cat va
+  chen audio nhung chua xong cac buoc sau) roi chay lai bi cat chong.
+
+### Don dep
+- Bo tab Import Data.
+- Bo tab Handle track image.
 "@
 
 $payload = @{
     tag_name = $tag
-    name = "v1.27.0 - Canvas Blur co 4 muc mask1-mask4"
+    name = "v1.28.0 - Them BDC, bo tab Import Data va Handle track image"
     body = $bodyText
     draft = $false
     prerelease = $false
