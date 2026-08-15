@@ -144,6 +144,137 @@ def parse_cut_input(text: str) -> list[tuple[int, list[int]]]:
     return result
 
 
+# ── BDC: mapping ảnh law theo TÊN FILE ───────────────────────────────
+
+def build_picture_map_from_filenames(picture_folder: str) -> tuple[str, list[str]]:
+    """Sinh input mapping ảnh→audio từ TÊN FILE (quy trình BDC).
+
+    Tên file là số audio: '03.png' → audio 3, '20.png' → audio 20.
+    Khác 17 PROMAX vốn đọc mapping từ 3-insert-law-picture.txt.
+
+    Trả về (input_text, warnings). input_text dùng thẳng cho insert_picture_law
+    — giữ nguyên tên gốc bên trái ('03: 3') để engine tìm đúng file '03.png'.
+    """
+    warns = []
+    if not picture_folder or not os.path.isdir(picture_folder):
+        return "", ["Không tìm thấy folder 'law picture'"]
+
+    pairs = []  # (audio_num, stem)
+    for f in sorted(os.listdir(picture_folder), key=_natural_sort_key):
+        stem, ext = os.path.splitext(f)
+        if ext.lower() not in IMAGE_EXTS:
+            continue
+        try:
+            num = int(stem)
+        except ValueError:
+            warns.append(f"bỏ qua '{f}' — tên file không phải số")
+            continue
+        pairs.append((num, stem))
+
+    seen = {}
+    lines = []
+    for num, stem in sorted(pairs):
+        if num in seen:
+            warns.append(f"'{stem}' trùng số audio {num} với '{seen[num]}' — bỏ qua")
+            continue
+        seen[num] = stem
+        lines.append(f"{stem}: {num}")
+
+    if not lines:
+        warns.append("Không có ảnh nào đặt tên bằng số trong 'law picture'")
+    return "\n".join(lines), warns
+
+
+# ── Preflight cho quy trình 17 PROMAX ────────────────────────────────
+
+def preflight_17promax(draft_path: str, audio_folder: str, bg_video_path: str,
+                       picture_folder: str, cut_text: str, delete_text: str,
+                       pic_text: str) -> list[str]:
+    """Kiểm tra input của cả 4 bước TRƯỚC khi ghi bất cứ gì. Trả về list lỗi.
+
+    Bước 1 và 2 ghi vào draft trước khi bước sau kịp validate → chỉ cần bước 2
+    hoặc 4 sai là project nằm dở dang (đã cắt/chèn audio nhưng chưa xoá sub,
+    chưa sync, chưa chèn ảnh) và chạy lại thì cắt chồng. Hàm này chặn từ đầu.
+
+    Chỉ kiểm được input tĩnh: file tồn tại, parse được, index trong phạm vi.
+    Bước 3 (Sync Media) phụ thuộc trạng thái sau bước 1-2 nên không tiền kiểm được.
+    """
+    errs = []
+
+    json_path = os.path.join(draft_path, "draft_content.json")
+    if not os.path.isfile(json_path):
+        return ["draft_content.json không tồn tại"]
+
+    # ── file/folder ──
+    if not audio_folder or not os.path.isdir(audio_folder):
+        errs.append("Thiếu folder narration")
+    if not bg_video_path or not os.path.isfile(bg_video_path):
+        errs.append("Thiếu video nền")
+    if not picture_folder or not os.path.isdir(picture_folder):
+        errs.append("Thiếu folder 'law picture'")
+
+    try:
+        data = capcut.load_draft_content(draft_path)
+    except Exception as e:
+        return errs + [f"Không đọc được draft: {e}"]
+
+    en_track = find_english_text_track(data)
+    if en_track is None:
+        return errs + ["Không tìm thấy text track tiếng Anh"]
+    n_subs = len(get_sorted_subs(en_track, data))
+
+    # ── bước 1: cut & import audio ──
+    cuts = parse_cut_input(cut_text)
+    if not cuts:
+        errs.append("1-insert-radio.txt: không parse được (format 'STT: 1, 2, 3')")
+    for sub_idx, audio_nums in cuts:
+        if sub_idx > n_subs:
+            errs.append(f"1-insert-radio.txt: sub {sub_idx} vượt phạm vi "
+                        f"(project có {n_subs} sub)")
+        for n in audio_nums:
+            if not any(os.path.isfile(os.path.join(audio_folder, f"{n}{ext}"))
+                       for ext in (".mp3", ".wav", ".aac", ".m4a", ".ogg")):
+                errs.append(f"1-insert-radio.txt: thiếu file audio {n} trong narration/")
+
+    # ── bước 2: xoá SRT (chỉ cảnh báo, engine tự bỏ index thừa) ──
+    if delete_text.strip():
+        del_idx = parse_delete_input(delete_text)
+        if not del_idx:
+            errs.append("2-delete-narration.txt: không parse được (format '5-6' hoặc '20')")
+        elif all(i > n_subs or i < 1 for i in del_idx):
+            errs.append(f"2-delete-narration.txt: mọi sub đều vượt phạm vi "
+                        f"(project có {n_subs} sub)")
+
+    # ── bước 4: insert picture ──
+    mappings = parse_picture_law_input(pic_text)
+    if not mappings:
+        errs.append("3-insert-law-picture.txt: không parse được "
+                    "(format 'tên ảnh: 1, 2')")
+    elif picture_folder and os.path.isdir(picture_folder):
+        have = {os.path.splitext(f)[0].lower() for f in os.listdir(picture_folder)}
+        for name, _ in mappings:
+            if os.path.splitext(str(name))[0].lower() not in have:
+                errs.append(f"3-insert-law-picture.txt: không thấy ảnh '{name}' "
+                            f"trong 'law picture/'")
+
+    return errs
+
+
+def preflight_bdc(draft_path: str, audio_folder: str, bg_video_path: str,
+                  picture_folder: str, cut_text: str, delete_text: str) -> list[str]:
+    """Preflight cho BDC (3 bước). Như preflight_17promax nhưng mapping ảnh law
+    suy từ tên file thay vì đọc 3-insert-law-picture.txt, và không có Sync Media.
+    """
+    pic_text, _ = build_picture_map_from_filenames(picture_folder)
+    errs = preflight_17promax(draft_path, audio_folder, bg_video_path,
+                              picture_folder, cut_text, delete_text, pic_text)
+    # Thông báo hợp ngữ cảnh BDC: không có file txt nào cho bước ảnh
+    return [e.replace("3-insert-law-picture.txt: không parse được "
+                      "(format 'tên ảnh: 1, 2')",
+                      "law picture/: không có ảnh nào đặt tên bằng số")
+            for e in errs]
+
+
 # ── Cut & Import Audio ───────────────────────────────────────────────
 
 def cut_and_import_audio(
@@ -509,11 +640,18 @@ def delete_srt_and_cut(
     en_subs = get_sorted_subs(en_track, data)
     _log(f"  EN subs: {len(en_subs)}")
 
-    # Validate indices
-    for idx in indices:
-        if idx < 1 or idx > len(en_subs):
-            _log(f"  ERROR: sub {idx} out of range (1-{len(en_subs)})")
-            return SyncSubResult(False, f"Sub {idx} không tồn tại (1-{len(en_subs)})")
+    # Bỏ index ngoài phạm vi thay vì abort. Gõ lố ở cuối dải (vd 584-592 khi chỉ
+    # có 591 sub) là chuyện thường; bỏ số thừa cho đúng ý "xoá tới hết" mà vẫn
+    # KHÔNG bao giờ xoá nhầm sub không được yêu cầu (kẹp về sub cuối thì có).
+    bad = [i for i in indices if i < 1 or i > len(en_subs)]
+    if bad:
+        indices = [i for i in indices if 1 <= i <= len(en_subs)]
+        _log(f"  ⚠ BỎ QUA {len(bad)} sub ngoài phạm vi (1-{len(en_subs)}): "
+             f"{', '.join(map(str, bad[:10]))}{'...' if len(bad) > 10 else ''}")
+    if not indices:
+        _log(f"  ERROR: không còn sub hợp lệ nào (project có {len(en_subs)} sub)")
+        return SyncSubResult(
+            False, f"Không có sub nào hợp lệ — project chỉ có {len(en_subs)} sub")
 
     # Tìm timing các sub cần xóa, gộp liền kề thành vùng
     delete_ranges = []  # [(start, end, duration)]

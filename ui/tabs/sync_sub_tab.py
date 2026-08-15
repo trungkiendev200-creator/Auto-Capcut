@@ -6,7 +6,7 @@ import customtkinter as ctk
 from tkinter import filedialog, messagebox
 
 from ui.theme import COLORS as C, FONT
-from core import sync_sub_engine, capcut, track_image_engine
+from core import sync_sub_engine, capcut
 
 
 class SyncSubTab:
@@ -28,6 +28,8 @@ class SyncSubTab:
         self.promax_bg_var = ctk.StringVar()
         self.p17_parent_var = ctk.StringVar()
         self.p17_bg_var = ctk.StringVar()
+        self.bdc_parent_var = ctk.StringVar()
+        self.bdc_bg_var = ctk.StringVar()
         self._unlocked = False
         self._parent = parent
         self._build_lock_screen(parent)
@@ -107,7 +109,7 @@ class SyncSubTab:
         self._build_picture_law_tab(sub_tabs.add("Insert Picture"))
         self._build_promax_tab(sub_tabs.add("PROMAX"))
         self._build_17promax_tab(sub_tabs.add("17 PROMAX"))
-        self._build_handle_track_image_tab(sub_tabs.add("Handle track image"))
+        self._build_bdc_tab(sub_tabs.add("BDC"))
 
         # ── Info bar ──
         self.info = ctk.CTkLabel(
@@ -1328,6 +1330,27 @@ class SyncSubTab:
                 fail_count += 1
                 continue
 
+            # ── Preflight: kiểm tra input cả 4 bước TRƯỚC khi ghi ──
+            # Bước 1 ghi vào draft trước khi bước 2/4 kịp validate → sai ở bước
+            # sau là project nằm dở dang và chạy lại sẽ cắt chồng.
+            try:
+                errs = sync_sub_engine.preflight_17promax(
+                    draft_path, narration_folder, bg_video, picture_folder,
+                    cut_text, delete_text, pic_text,
+                )
+            except Exception as e:
+                errs = [f"preflight lỗi: {e}"]
+            if errs:
+                _log(f"  PREFLIGHT FAIL ({len(errs)} lỗi) — bỏ qua, KHÔNG đụng vào project:")
+                for m in errs[:10]:
+                    _log(f"    - {m}")
+                if len(errs) > 10:
+                    _log(f"    ... và {len(errs) - 10} lỗi nữa")
+                root.after(0, self.app.project_list.set_status, idx, "Fail", C["red"])
+                fail_count += 1
+                continue
+            _log("  preflight OK")
+
             project_ok = True
 
             # ── 4 bước (quy trình mới, không hook/intro) ──
@@ -1417,97 +1440,359 @@ class SyncSubTab:
         root.after(0, lambda: self.p17_btn.configure(
             state="normal", text="Run 17 PROMAX"))
 
-    # ── Sub-tab: Handle track image ────────────────────────────────
-    def _build_handle_track_image_tab(self, parent):
+    # ── Sub-tab: BDC ───────────────────────────────────────────────
+    def _build_bdc_tab(self, parent):
+        import tkinter as tk
+
         f = ctk.CTkFrame(parent, fg_color="transparent")
         f.pack(fill="both", expand=True, padx=10, pady=6)
 
+        # Parent folder
+        r1 = ctk.CTkFrame(f, fg_color="transparent")
+        r1.pack(fill="x", pady=(0, 4))
+        ctk.CTkLabel(r1, text="Thư mục cha:", width=95, anchor="w",
+                     font=FONT["small"], text_color=C["text_light"]).pack(side="left")
+        ctk.CTkEntry(r1, textvariable=self.bdc_parent_var, height=28,
+                     fg_color=C["input_bg"], border_color=C["input_border"],
+                     text_color=C["text"], corner_radius=6, font=FONT["small"]
+                     ).pack(side="left", fill="x", expand=True, padx=(4, 4))
+        ctk.CTkButton(r1, text="...", width=28, height=28, corner_radius=6,
+                      fg_color=C["tab_bg"], text_color=C["text"],
+                      hover_color=C["primary_muted"], border_width=1,
+                      border_color=C["input_border"], font=FONT["small"],
+                      command=lambda: self._browse_dir(self.bdc_parent_var)
+                      ).pack(side="left")
+
+        # BG video
+        r2 = ctk.CTkFrame(f, fg_color="transparent")
+        r2.pack(fill="x", pady=(0, 4))
+        ctk.CTkLabel(r2, text="Video nền:", width=95, anchor="w",
+                     font=FONT["small"], text_color=C["text_light"]).pack(side="left")
+        ctk.CTkEntry(r2, textvariable=self.bdc_bg_var, height=28,
+                     fg_color=C["input_bg"], border_color=C["input_border"],
+                     text_color=C["text"], corner_radius=6, font=FONT["small"]
+                     ).pack(side="left", fill="x", expand=True, padx=(4, 4))
+        ctk.CTkButton(r2, text="...", width=28, height=28, corner_radius=6,
+                      fg_color=C["tab_bg"], text_color=C["text"],
+                      hover_color=C["primary_muted"], border_width=1,
+                      border_color=C["input_border"], font=FONT["small"],
+                      command=lambda: self._browse_file_to(
+                          self.bdc_bg_var, "Chọn video nền",
+                          [("Video", "*.mp4 *.mov *.avi *.mkv"), ("All", "*.*")])
+                      ).pack(side="left")
+
+        # Sync speed + animation
+        r3 = ctk.CTkFrame(f, fg_color="transparent")
+        r3.pack(fill="x", pady=(0, 4))
+        ctk.CTkLabel(r3, text="Sync Speed:", width=95, anchor="w",
+                     font=FONT["small"], text_color=C["text_light"]).pack(side="left")
+        self.bdc_speed_var = ctk.StringVar(value="1.3")
+        ctk.CTkEntry(r3, textvariable=self.bdc_speed_var, height=28, width=80,
+                     fg_color=C["input_bg"], border_color=C["input_border"],
+                     text_color=C["text"], corner_radius=6, font=FONT["small"]
+                     ).pack(side="left", padx=(4, 0))
+        self.bdc_anim_var = tk.BooleanVar(value=True)
+        ctk.CTkCheckBox(
+            r3, text="Animation cho ảnh", variable=self.bdc_anim_var,
+            font=FONT["small"], text_color=C["text_light"],
+            checkbox_width=16, checkbox_height=16,
+            fg_color=C["primary"], hover_color=C["primary_hover"],
+        ).pack(side="left", padx=(12, 0))
+
+        # Padding
+        r4 = ctk.CTkFrame(f, fg_color="transparent")
+        r4.pack(fill="x", pady=(0, 4))
+        self.bdc_padding_var = tk.BooleanVar(value=True)
+        ctk.CTkCheckBox(
+            r4, text="Padding", variable=self.bdc_padding_var,
+            font=FONT["small"], text_color=C["text_light"],
+            checkbox_width=16, checkbox_height=16,
+            fg_color=C["primary"], hover_color=C["primary_hover"],
+        ).pack(side="left")
+        ctk.CTkLabel(r4, text="Thời gian (giây):", font=FONT["small"],
+                     text_color=C["text_light"]).pack(side="left", padx=(12, 4))
+        self.bdc_padding_sec_var = ctk.StringVar(value="0.25")
+        ctk.CTkEntry(r4, textvariable=self.bdc_padding_sec_var, height=28, width=70,
+                     fg_color=C["input_bg"], border_color=C["input_border"],
+                     text_color=C["text"], corner_radius=6, font=FONT["small"]
+                     ).pack(side="left")
+
         info_text = (
-            "Chọn 1+ project bên phải. Tool sửa effect (Blur...) từ "
-            "apply_target_type=2 (global) → 1 (main track only) → effect chỉ "
-            "apply lên video chính, KHÔNG che ảnh overlay.\n"
-            "Thoát CapCut trước khi chạy."
+            "BDC — 4 bước, giống 17 PROMAX, chỉ khác cách map ảnh law:\n"
+            "  [1] Cut & Import Audio (1-insert-radio.txt + narration/) — có padding tùy chọn\n"
+            "  [2] Delete SRT (2-delete-narration.txt)\n"
+            "  [3] Sync Media @speed (cắt random video gốc thay video nền)\n"
+            "  [4] Insert Picture (law picture/) — mapping theo TÊN FILE ẢNH\n"
+            "Ảnh đặt tên bằng số = số narration: 03.png → audio 3, 20.png → audio 20.\n"
+            "KHÔNG cần 3-insert-law-picture.txt. Project cần có SRT sẵn."
         )
         ctk.CTkLabel(f, text=info_text, font=("Segoe UI", 10),
-                     text_color=C["text_light"], justify="left", wraplength=560
-                     ).pack(anchor="w", pady=(4, 8))
+                     text_color=C["text_light"], justify="left", wraplength=520
+                     ).pack(anchor="w", pady=(4, 6))
 
-        self.hti_btn = ctk.CTkButton(
-            f, text="Run — Fix effect không che ảnh", height=36, corner_radius=8,
-            fg_color=C["primary"], hover_color=C["primary_hover"],
+        self.bdc_btn = ctk.CTkButton(
+            f, text="Run BDC", height=36, corner_radius=8,
+            fg_color=C["accent"], hover_color="#7c3aed",
             text_color=C["text_white"], font=FONT["button"],
-            command=self._on_run_handle_track_image
+            command=self._on_run_bdc
         )
-        self.hti_btn.pack(fill="x")
+        self.bdc_btn.pack(fill="x")
 
-    def _on_run_handle_track_image(self):
-        selected = self.app.project_list.get_selected()
-        if not selected:
-            self._set_info("Chưa chọn project nào!", C["red_light"], C["red"])
-            return
+    def _validate_bdc_data(self, selected, parent_folder):
+        """Như _validate_promax_data nhưng KHÔNG cần 3-insert-law-picture.txt;
+        thay vào đó 'law picture/' phải có ít nhất 1 ảnh đặt tên bằng số."""
+        errors = []
+        for idx, draft in selected:
+            name = draft.get("draft_name", "?")
+            if not self._resolve_path(draft):
+                errors.append(f"[{name}] Không tìm thấy draft folder trong CapCut")
+                continue
 
-        names = [d.get("draft_name", "?") for _, d in selected]
-        preview = ", ".join(names[:5]) + ("..." if len(names) > 5 else "")
-        confirm = messagebox.askokcancel(
-            "Handle track image",
-            f"Sẽ xử lý {len(selected)} project:\n{preview}\n\n"
-            "Tool đổi apply_target_type của effect 2→1 (effect chỉ apply trên main track).\n"
-            "Thoát CapCut trước khi tiếp tục.\nOK?"
-        )
-        if not confirm:
-            return
+            sub = os.path.join(parent_folder, name)
+            if not os.path.isdir(sub):
+                errors.append(f"[{name}] Thiếu subfolder: {sub}")
+                continue
 
-        self.hti_btn.configure(state="disabled", text="Đang chạy...")
-        self._set_info(f"Handle track image: {len(selected)} project...",
-                       C["primary_light"], C["primary"])
+            narr = os.path.join(sub, "narration")
+            pics = os.path.join(sub, "law picture")
+            if not os.path.isdir(narr):
+                errors.append(f"[{name}] Thiếu: narration/")
+            elif not any(f.lower().endswith((".mp3", ".wav", ".aac", ".m4a", ".ogg"))
+                         for f in os.listdir(narr)):
+                errors.append(f"[{name}] narration/ không có file audio")
 
-        threading.Thread(
-            target=self._run_handle_track_image,
-            args=(selected,),
-            daemon=True
-        ).start()
+            if not os.path.isdir(pics):
+                errors.append(f"[{name}] Thiếu: law picture/")
+            else:
+                pic_text, warns = sync_sub_engine.build_picture_map_from_filenames(pics)
+                if not pic_text.strip():
+                    errors.append(f"[{name}] law picture/ không có ảnh nào "
+                                  f"đặt tên bằng số (vd 03.png)")
+                for w in warns:
+                    errors.append(f"[{name}] law picture/: {w}")
 
-    def _run_handle_track_image(self, selected):
+            for label, allow_empty in (("1-insert-radio.txt", False),
+                                       ("2-delete-narration.txt", True)):
+                p = os.path.join(sub, label)
+                if not os.path.isfile(p):
+                    errors.append(f"[{name}] Thiếu: {label}")
+                elif not allow_empty:
+                    try:
+                        if not self._read_text(p).strip():
+                            errors.append(f"[{name}] File trống: {label}")
+                    except Exception as e:
+                        errors.append(f"[{name}] Không đọc được {label}: {e}")
+        return errors
+
+    def _on_run_bdc(self):
+        try:
+            selected = self.app.project_list.get_selected()
+            if not selected:
+                self._set_info("Chưa chọn project nào!", C["red_light"], C["red"])
+                return
+
+            parent_folder = self.bdc_parent_var.get().strip()
+            bg_video = self.bdc_bg_var.get().strip()
+            if not parent_folder or not os.path.isdir(parent_folder):
+                self._set_info("Thư mục cha không hợp lệ!", C["red_light"], C["red"])
+                return
+            if not bg_video or not os.path.isfile(bg_video):
+                self._set_info("Video nền không hợp lệ!", C["red_light"], C["red"])
+                return
+
+            try:
+                speed = float(self.bdc_speed_var.get())
+                if speed <= 0:
+                    raise ValueError
+            except ValueError:
+                self._set_info("Speed không hợp lệ!", C["red_light"], C["red"])
+                return
+
+            add_anim = self.bdc_anim_var.get()
+            if self.bdc_padding_var.get():
+                try:
+                    padding_us = int(float(self.bdc_padding_sec_var.get()) * 1_000_000)
+                    if padding_us < 0:
+                        raise ValueError
+                except ValueError:
+                    self._set_info("Padding (giây) không hợp lệ!", C["red_light"], C["red"])
+                    return
+            else:
+                padding_us = 0
+
+            errors = self._validate_bdc_data(selected, parent_folder)
+            if errors:
+                self._append_log("[BDC VALIDATE] Data không hợp lệ:")
+                for e in errors:
+                    self._append_log(f"  - {e}")
+                self._set_info(f"Validate fail: {len(errors)} lỗi",
+                               C["red_light"], C["red"])
+                messagebox.showerror(
+                    "BDC — Validate Fail",
+                    "Kiểm tra dữ liệu thất bại. Chưa chạy gì cả.\n\n" + "\n".join(errors)
+                )
+                return
+
+            names = [d.get("draft_name", "?") for _, d in selected]
+            preview = ", ".join(names[:5]) + ("..." if len(names) > 5 else "")
+            pad_label = f"{padding_us / 1_000_000:g}s" if padding_us > 0 else "OFF"
+            confirm = messagebox.askokcancel(
+                "BDC",
+                f"Validate OK. Chạy {len(selected)} project:\n{preview}\n\n"
+                f"Speed: {speed}x | Animation: {'ON' if add_anim else 'OFF'} | "
+                f"Padding: {pad_label}\n"
+                f"Ảnh law map theo TÊN FILE (03.png → audio 3)\n\n"
+                "Thoát CapCut trước khi tiếp tục.\nOK?"
+            )
+            if not confirm:
+                return
+
+            self.bdc_btn.configure(state="disabled", text="Đang chạy...")
+            self._set_info(f"BDC: {len(selected)} projects...",
+                           C["primary_light"], C["primary"])
+
+            threading.Thread(
+                target=self._run_bdc,
+                args=(selected, parent_folder, bg_video, speed, add_anim, padding_us),
+                daemon=True,
+            ).start()
+        except Exception as e:
+            import traceback
+            self._append_log(f"[BDC] EXCEPTION: {traceback.format_exc()}")
+            self._set_info(f"Error: {e}", C["red_light"], C["red"])
+
+    def _run_bdc(self, selected, parent_folder, bg_video, speed, add_anim, padding_us):
         root = self.app.root
         _log = self._make_log_fn()
 
-        ok = skip = fail = 0
+        ok_count = 0
+        fail_count = 0
         total = len(selected)
 
         for i, (idx, draft) in enumerate(selected, start=1):
             name = draft.get("draft_name", "?")
             draft_path = self._resolve_path(draft)
 
-            _log(f"── [{i}/{total}] {name} ──")
+            _log(f"── [{i}/{total}] BDC: {name} ──")
             root.after(0, self.app.project_list.set_status, idx, "...", C["primary"])
+            root.after(0, self._set_info, f"[{i}/{total}] {name}...",
+                       C["primary_light"], C["primary"])
 
             if not draft_path:
-                _log(f"  FAIL: draft folder not found")
+                _log("  FAIL: draft folder not found")
                 root.after(0, self.app.project_list.set_status, idx, "Fail", C["red"])
-                fail += 1
+                fail_count += 1
                 continue
 
-            r = track_image_engine.fix_image_overlay(draft_path)
-            if r.success and r.effects_changed > 0:
-                ok += 1
-                _log(f"  OK: {r.message}")
-                root.after(0, self.app.project_list.set_status, idx, "OK", C["green"])
-            elif r.success:
-                skip += 1
-                _log(f"  SKIP: {r.message}")
-                root.after(0, self.app.project_list.set_status, idx, "Skip", C["text_light"])
-            else:
-                fail += 1
-                _log(f"  FAIL: {r.message}")
-                root.after(0, self.app.project_list.set_status, idx, "Fail", C["red"])
+            sub_folder = os.path.join(parent_folder, name)
+            narration_folder = os.path.join(sub_folder, "narration")
+            picture_folder = os.path.join(sub_folder, "law picture")
 
-        summary = f"Handle track image xong: {ok}/{total} OK, {skip} skip, {fail} fail"
+            try:
+                cut_text = self._read_text(os.path.join(sub_folder, "1-insert-radio.txt"))
+                delete_text = self._read_text(
+                    os.path.join(sub_folder, "2-delete-narration.txt"))
+            except Exception as e:
+                _log(f"  FAIL: read txt error: {e}")
+                root.after(0, self.app.project_list.set_status, idx, "Fail", C["red"])
+                fail_count += 1
+                continue
+
+            # Mapping ảnh law từ tên file (thay cho 3-insert-law-picture.txt)
+            pic_text, pic_warns = sync_sub_engine.build_picture_map_from_filenames(
+                picture_folder)
+            for w in pic_warns:
+                _log(f"  ⚠ law picture: {w}")
+            _log(f"  mapping ảnh theo tên file: {len(pic_text.splitlines())} ảnh")
+
+            # ── Preflight: chặn trước khi ghi ──
+            try:
+                errs = sync_sub_engine.preflight_bdc(
+                    draft_path, narration_folder, bg_video, picture_folder,
+                    cut_text, delete_text,
+                )
+            except Exception as e:
+                errs = [f"preflight lỗi: {e}"]
+            if errs:
+                _log(f"  PREFLIGHT FAIL ({len(errs)} lỗi) — bỏ qua, KHÔNG đụng vào project:")
+                for m in errs[:10]:
+                    _log(f"    - {m}")
+                if len(errs) > 10:
+                    _log(f"    ... và {len(errs) - 10} lỗi nữa")
+                root.after(0, self.app.project_list.set_status, idx, "Fail", C["red"])
+                fail_count += 1
+                continue
+            _log("  preflight OK")
+
+            project_ok = True
+
+            _log(f"  [1/4] Cut & Import Audio (padding={padding_us/1_000_000:g}s)")
+            try:
+                r = sync_sub_engine.cut_and_import_audio(
+                    draft_path, narration_folder, bg_video, cut_text,
+                    backup=True, log_fn=_log, padding_us=padding_us)
+                _log(f"    {'OK' if r.success else 'FAIL'}: {r.message}")
+                project_ok = r.success
+            except Exception:
+                import traceback
+                _log(f"    EXCEPTION: {traceback.format_exc()}")
+                project_ok = False
+
+            if project_ok:
+                if delete_text.strip():
+                    _log("  [2/4] Xóa SRT")
+                    try:
+                        r = sync_sub_engine.delete_srt_and_cut(
+                            draft_path, delete_text, backup=True, log_fn=_log)
+                        _log(f"    {'OK' if r.success else 'FAIL'}: {r.message}")
+                        project_ok = r.success
+                    except Exception:
+                        import traceback
+                        _log(f"    EXCEPTION: {traceback.format_exc()}")
+                        project_ok = False
+                else:
+                    _log("  [2/4] Xóa SRT: file trống, bỏ qua")
+
+            if project_ok:
+                _log(f"  [3/4] Sync Media @{speed}x")
+                try:
+                    r = sync_sub_engine.sync_media_sub(
+                        draft_path, speed=speed, backup=True, log_fn=_log)
+                    _log(f"    {'OK' if r.success else 'FAIL'}: {r.message}")
+                    project_ok = r.success
+                except Exception:
+                    import traceback
+                    _log(f"    EXCEPTION: {traceback.format_exc()}")
+                    project_ok = False
+
+            if project_ok:
+                _log("  [4/4] Insert Picture (map theo tên file)")
+                try:
+                    r = sync_sub_engine.insert_picture_law(
+                        draft_path, picture_folder, pic_text,
+                        add_animation=add_anim, backup=True, log_fn=_log)
+                    _log(f"    {'OK' if r.success else 'FAIL'}: {r.message}")
+                    project_ok = r.success
+                except Exception:
+                    import traceback
+                    _log(f"    EXCEPTION: {traceback.format_exc()}")
+                    project_ok = False
+
+            if project_ok:
+                ok_count += 1
+                root.after(0, self.app.project_list.set_status, idx, "OK", C["green"])
+                _log(f"  ✓ DONE: {name}")
+            else:
+                fail_count += 1
+                root.after(0, self.app.project_list.set_status, idx, "Fail", C["red"])
+                _log(f"  ✗ FAIL: {name}")
+
+        summary = f"BDC xong: {ok_count}/{total} OK, {fail_count} fail"
         _log(f"══ {summary} ══")
-        color_bg = C["green_light"] if fail == 0 else C["red_light"]
-        color_fg = C["green"] if fail == 0 else C["red"]
+        color_bg = C["green_light"] if fail_count == 0 else C["red_light"]
+        color_fg = C["green"] if fail_count == 0 else C["red"]
         root.after(0, self._set_info, summary, color_bg, color_fg)
-        root.after(0, lambda: self.hti_btn.configure(
-            state="normal", text="Run — Fix effect không che ảnh"))
+        root.after(0, lambda: self.bdc_btn.configure(state="normal", text="Run BDC"))
 
     @staticmethod
     def _read_text(path: str) -> str:
