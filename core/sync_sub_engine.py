@@ -3,6 +3,7 @@
 import os
 import json
 import copy
+import random
 import shutil
 import uuid
 import re
@@ -562,19 +563,22 @@ def cut_and_import_audio(
 
 def parse_delete_input(text: str) -> list[int]:
     """
-    Parse input dạng:
+    Parse input dạng mỗi mục 1 dòng, HOẶC nhiều mục cách nhau bằng dấu phẩy
+    trên cùng 1 dòng (trộn lẫn cả hai cũng được):
         5 - 6
         20
         468 - 469
+    hoặc:
+        5-6, 20, 468-469
     Returns: sorted list of unique sub indices [5, 6, 20, 468, 469]
     """
     result = set()
-    for line in text.strip().splitlines():
-        line = line.strip()
-        if not line:
+    for chunk in text.replace(",", "\n").splitlines():
+        chunk = chunk.strip()
+        if not chunk:
             continue
-        if "-" in line:
-            parts = line.split("-", 1)
+        if "-" in chunk:
+            parts = chunk.split("-", 1)
             try:
                 start = int(parts[0].strip())
                 end = int(parts[1].strip())
@@ -584,7 +588,7 @@ def parse_delete_input(text: str) -> list[int]:
                 continue
         else:
             try:
-                result.add(int(line.strip()))
+                result.add(int(chunk))
             except ValueError:
                 continue
     return sorted(result)
@@ -1358,4 +1362,950 @@ def insert_picture_law(
         True,
         f"Đã chèn {inserted} ảnh law{anim_text}",
         sub_count=inserted,
+    )
+
+
+# ── BDC: Change Video ────────────────────────────────────────────────
+# Xoá track sub + track ảnh, thay narration mp3 + video nền chạy trên nó
+# bằng video dựng sẵn trong 'video-narration/' (mỗi scene = 1 file
+# '{cue}-narration.mp4', phủ đúng các audio liệt kê trong '{cue}-state.json').
+
+def _mat_type_map(data: dict) -> dict:
+    return {m["id"]: m.get("type", "video")
+            for m in data.get("materials", {}).get("videos", [])}
+
+
+def _find_picture_video_tracks(data: dict) -> list[dict]:
+    """Video track chỉ chứa ảnh (track 'ảnh' — law picture overlay).
+
+    Nhận diện: mọi segment trong track đều trỏ tới material type='photo'.
+    """
+    mat_types = _mat_type_map(data)
+    result = []
+    for t in data.get("tracks", []):
+        if t.get("type") != "video":
+            continue
+        segs = t.get("segments", [])
+        if not segs:
+            continue
+        if all(mat_types.get(s.get("material_id"), "video") == "photo" for s in segs):
+            result.append(t)
+    return result
+
+
+def _find_content_video_tracks(data: dict) -> list[dict]:
+    """Video track nội dung chính (không phải track ảnh)."""
+    picture_ids = {t["id"] for t in _find_picture_video_tracks(data)}
+    return [t for t in data.get("tracks", [])
+            if t.get("type") == "video" and t.get("id") not in picture_ids]
+
+
+def scan_narration_scenes(narration_folder: str) -> tuple[list[dict], list[str]]:
+    """Đọc các file '*-state.json' trong video-narration/, trả về danh sách scene.
+
+    Mỗi scene: {"cue": str, "nums": [int,...], "mp4_path": str}.
+    'nums' là các audio number (khớp N.mp3 trong narration/) mà file
+    '{cue}-narration.mp4' đã dựng sẵn để thay thế.
+    """
+    warns = []
+    scenes = []
+    if not narration_folder or not os.path.isdir(narration_folder):
+        return scenes, ["Không tìm thấy folder video-narration"]
+
+    for f in sorted(os.listdir(narration_folder), key=_natural_sort_key):
+        if not f.endswith("-state.json"):
+            continue
+        cue = f[:-len("-state.json")]
+        state_path = os.path.join(narration_folder, f)
+        try:
+            with open(state_path, "r", encoding="utf-8") as fh:
+                state = json.load(fh)
+        except Exception as e:
+            warns.append(f"{f}: không đọc được ({e})")
+            continue
+
+        nums = []
+        for it in state.get("items", []):
+            try:
+                nums.append(int(it["num"]))
+            except (KeyError, ValueError, TypeError):
+                continue
+        if not nums:
+            warns.append(f"{f}: không có 'items[].num' hợp lệ")
+            continue
+
+        mp4_path = os.path.join(narration_folder, f"{cue}-narration.mp4")
+        if not os.path.isfile(mp4_path):
+            warns.append(f"{cue}: thiếu file {cue}-narration.mp4")
+            continue
+
+        scenes.append({"cue": cue, "nums": sorted(set(nums)), "mp4_path": mp4_path})
+
+    return scenes, warns
+
+
+def preflight_change_video(draft_path: str, narration_folder: str) -> list[str]:
+    """Kiểm tra input trước khi ghi. Chỉ chặn lỗi cấu trúc; thiếu 1 vài audio
+    (vd đã bị xoá SRT trước đó) không chặn — engine tự bỏ qua khi chạy thật.
+    """
+    errs = []
+
+    json_path = os.path.join(draft_path, "draft_content.json")
+    if not os.path.isfile(json_path):
+        return ["draft_content.json không tồn tại"]
+
+    scenes, warns = scan_narration_scenes(narration_folder)
+    errs.extend(warns)
+    if not scenes:
+        errs.append("video-narration/: không tìm thấy scene hợp lệ nào "
+                     "(*-state.json + *-narration.mp4)")
+        return errs
+
+    try:
+        data = capcut.load_draft_content(draft_path)
+    except Exception as e:
+        return errs + [f"Không đọc được draft: {e}"]
+
+    content_tracks = _find_content_video_tracks(data)
+    if len(content_tracks) == 0:
+        errs.append("Không tìm thấy video track chính")
+    elif len(content_tracks) > 1:
+        errs.append(f"Có {len(content_tracks)} video track chính (chỉ hỗ trợ 1) — "
+                     f"kiểm tra lại project")
+
+    audio_track = capcut.find_audio_track(data)
+    if not audio_track or not audio_track.get("segments"):
+        errs.append("Không tìm thấy audio track narration (project đã Change Video rồi?)")
+
+    return errs
+
+
+def change_video(
+    draft_path: str,
+    narration_folder: str,
+    backup: bool = True,
+    log_fn=None,
+) -> SyncSubResult:
+    """
+    Change Video (BDC) — 2 bước:
+      1. Xoá track sub (text) + track ảnh (video track toàn ảnh law).
+      2. Thay narration mp3 + video nền chạy trên nó bằng video dựng sẵn
+         trong video-narration/, theo timing (delta duration → shift phần
+         sau) chứ không giả định khớp tuyệt đối.
+    """
+    _log = log_fn or (lambda msg: None)
+
+    json_path = os.path.join(draft_path, "draft_content.json")
+    if not os.path.isfile(json_path):
+        return SyncSubResult(False, "draft_content.json not found")
+
+    scenes, warns = scan_narration_scenes(narration_folder)
+    for w in warns:
+        _log(f"  ⚠ {w}")
+    if not scenes:
+        return SyncSubResult(False, "Không tìm thấy scene nào trong video-narration/")
+
+    if backup:
+        bak_path = json_path + ".bak"
+        if not os.path.isfile(bak_path):
+            shutil.copy2(json_path, bak_path)
+            _log("  backup created")
+        else:
+            _log("  backup exists, skipping")
+
+    data = capcut.load_draft_content(draft_path)
+
+    # ── Bước 1: xoá track sub (text) + track ảnh (video toàn ảnh) ──
+    n_text_tracks = sum(1 for t in data["tracks"] if t.get("type") == "text")
+    picture_tracks = _find_picture_video_tracks(data)
+    picture_ids = {t["id"] for t in picture_tracks}
+    n_pic_segs = sum(len(t.get("segments", [])) for t in picture_tracks)
+
+    data["tracks"] = [t for t in data["tracks"]
+                       if t.get("type") != "text" and t.get("id") not in picture_ids]
+    _log(f"  [1/2] Đã xoá {n_text_tracks} track sub, {len(picture_tracks)} track ảnh "
+         f"({n_pic_segs} ảnh)")
+
+    content_tracks = _find_content_video_tracks(data)
+    if len(content_tracks) != 1:
+        return SyncSubResult(
+            False, f"Cần đúng 1 video track chính, tìm thấy {len(content_tracks)}")
+    content_track = content_tracks[0]
+
+    audio_track = capcut.find_audio_track(data)
+    if not audio_track or not audio_track.get("segments"):
+        return SyncSubResult(False, "Không tìm thấy audio track narration")
+
+    # Build audio number → segment map (giống insert_picture_law)
+    audio_map = {}
+    amats = {m["id"]: m for m in data.get("materials", {}).get("audios", [])}
+    for seg in audio_track["segments"]:
+        m = amats.get(seg.get("material_id"))
+        if not m:
+            continue
+        stem = os.path.splitext(os.path.basename(m.get("path", "")))[0]
+        try:
+            audio_map[int(stem)] = seg
+        except ValueError:
+            pass
+
+    # ── Bước 2a: xác định vùng thay thế cho từng scene ──
+    regions = []
+    for sc in scenes:
+        found_segs = [audio_map[n] for n in sc["nums"] if n in audio_map]
+        missing = [n for n in sc["nums"] if n not in audio_map]
+        if missing:
+            _log(f"  ⚠ scene {sc['cue']}: thiếu audio {missing} trong project (đã bị xoá?)")
+        if not found_segs:
+            _log(f"  ⚠ scene {sc['cue']}: bỏ qua — không còn audio nào trong project")
+            continue
+
+        region_start = min(s["target_timerange"]["start"] for s in found_segs)
+        region_end = max(s["target_timerange"]["start"] + s["target_timerange"]["duration"]
+                          for s in found_segs)
+        old_dur = region_end - region_start
+
+        info = _get_media_info(sc["mp4_path"])
+        new_dur = info["duration"]
+        if new_dur <= 0:
+            _log(f"  ⚠ scene {sc['cue']}: không đọc được duration video, bỏ qua")
+            continue
+
+        regions.append({
+            "cue": sc["cue"], "start": region_start, "end": region_end,
+            "delta": new_dur - old_dur, "mp4_path": sc["mp4_path"], "new_dur": new_dur,
+            "used_seg_ids": {id(s) for s in found_segs},
+        })
+        _log(f"  scene {sc['cue']}: {region_start/1e6:.2f}s-{region_end/1e6:.2f}s "
+             f"({old_dur/1e6:.2f}s) → {new_dur/1e6:.2f}s (Δ{(new_dur-old_dur)/1e6:+.2f}s)")
+
+    if not regions:
+        return SyncSubResult(False, "Không có scene nào áp dụng được")
+
+    regions.sort(key=lambda r: r["start"])
+
+    def calc_offset(t):
+        return sum(r["delta"] for r in regions if r["end"] <= t)
+
+    # ── Bước 2b: rebuild video track chính — bỏ đoạn trong vùng, chèn video mới ──
+    new_segs = []
+    for seg in content_track["segments"]:
+        t_start = seg["target_timerange"]["start"]
+        t_end = t_start + seg["target_timerange"]["duration"]
+        in_region = any(r["start"] <= t_start and t_end <= r["end"] for r in regions)
+        if in_region:
+            continue
+        seg["target_timerange"]["start"] = t_start + calc_offset(t_start)
+        new_segs.append(seg)
+
+    for r in regions:
+        offset = calc_offset(r["start"])
+        info = _get_media_info(r["mp4_path"])
+        v_mat = _make_video_material(r["mp4_path"], info)
+        data["materials"].setdefault("videos", []).append(v_mat)
+        sp_mat = _make_speed_material()
+        cv_mat = _make_canvas_material()
+        snd_mat = _make_sound_channel()
+        data["materials"].setdefault("speeds", []).append(sp_mat)
+        data["materials"].setdefault("canvases", []).append(cv_mat)
+        data["materials"].setdefault("sound_channel_mappings", []).append(snd_mat)
+
+        new_seg = _make_video_segment(
+            material_id=v_mat["id"], start=r["start"] + offset, duration=r["new_dur"],
+            speed_id=sp_mat["id"], canvas_id=cv_mat["id"], sound_id=snd_mat["id"],
+        )
+        new_segs.append(new_seg)
+
+    content_track["segments"] = sorted(new_segs, key=lambda s: s["target_timerange"]["start"])
+
+    # ── Bước 2c: audio track — bỏ segment đã dùng, shift phần còn lại ──
+    used_ids = set()
+    for r in regions:
+        used_ids |= r["used_seg_ids"]
+
+    remaining_audio = []
+    for seg in audio_track["segments"]:
+        if id(seg) in used_ids:
+            continue
+        t_start = seg["target_timerange"]["start"]
+        seg["target_timerange"]["start"] = t_start + calc_offset(t_start)
+        remaining_audio.append(seg)
+
+    if remaining_audio:
+        audio_track["segments"] = sorted(
+            remaining_audio, key=lambda s: s["target_timerange"]["start"])
+        _log(f"  [2/2] Đã thay {len(regions)} scene, còn {len(remaining_audio)} "
+             f"audio chưa thay (giữ track audio)")
+    else:
+        data["tracks"] = [t for t in data["tracks"] if t.get("id") != audio_track["id"]]
+        _log(f"  [2/2] Đã thay {len(regions)} scene, xoá hết track audio narration")
+
+    # Cập nhật duration tổng project
+    all_ends = []
+    for t in data["tracks"]:
+        for seg in t.get("segments", []):
+            end = seg["target_timerange"]["start"] + seg["target_timerange"]["duration"]
+            all_ends.append(end)
+    if all_ends:
+        data["duration"] = max(all_ends)
+
+    _log(f"  saving {sum(len(t.get('segments',[])) for t in data['tracks'])} segments...")
+    capcut.save_draft_content(draft_path, data)
+    _log("  saved OK")
+
+    return SyncSubResult(
+        True,
+        f"Change Video: đã thay {len(regions)}/{len(scenes)} scene, "
+        f"xoá {n_text_tracks} track sub + {len(picture_tracks)} track ảnh",
+        sub_count=len(regions),
+    )
+
+
+# ── Chèn Outro ────────────────────────────────────────────────────────
+# Chèn video outro vào CUỐI video track chính của từng project, khớp theo
+# tên: 'bodycam-video004' → 'outro-video004.mp4' trong thư mục outro.
+
+_OUTRO_VIDEO_EXTS = (".mp4", ".mov", ".avi", ".mkv")
+
+
+def resolve_outro_path(outro_folder: str, draft_name: str) -> str | None:
+    """Tìm file outro tương ứng 1 project theo tên.
+
+    Quy tắc chính: đổi tiền tố 'bodycam-' → 'outro-'
+        'bodycam-video004' → 'outro-video004.mp4'
+    Fallback: khớp theo số cuối tên project với file 'outro...<số>.<ext>'
+    (phòng khi tên project không có tiền tố 'bodycam-').
+    """
+    if not outro_folder or not os.path.isdir(outro_folder):
+        return None
+
+    if draft_name.startswith("bodycam-"):
+        stem = "outro-" + draft_name[len("bodycam-"):]
+        for ext in _OUTRO_VIDEO_EXTS:
+            p = os.path.join(outro_folder, stem + ext)
+            if os.path.isfile(p):
+                return p
+
+    m = re.search(r"(\d+)$", draft_name)
+    if m:
+        num = m.group(1)
+        for f in sorted(os.listdir(outro_folder), key=_natural_sort_key):
+            fstem, ext = os.path.splitext(f)
+            if (ext.lower() in _OUTRO_VIDEO_EXTS and "outro" in fstem.lower()
+                    and fstem.lower().endswith(num)):
+                return os.path.join(outro_folder, f)
+
+    return None
+
+
+def preflight_insert_outro(draft_path: str, outro_path: str) -> list[str]:
+    """Kiểm tra input trước khi ghi."""
+    errs = []
+
+    json_path = os.path.join(draft_path, "draft_content.json")
+    if not os.path.isfile(json_path):
+        return ["draft_content.json không tồn tại"]
+
+    if not outro_path or not os.path.isfile(outro_path):
+        return ["Không tìm thấy file outro tương ứng"]
+
+    try:
+        data = capcut.load_draft_content(draft_path)
+    except Exception as e:
+        return [f"Không đọc được draft: {e}"]
+
+    content_tracks = _find_content_video_tracks(data)
+    if len(content_tracks) == 0:
+        errs.append("Không tìm thấy video track chính")
+    elif len(content_tracks) > 1:
+        errs.append(f"Có {len(content_tracks)} video track chính (chỉ hỗ trợ 1) — "
+                     f"kiểm tra lại project")
+
+    return errs
+
+
+def insert_outro(
+    draft_path: str,
+    outro_path: str,
+    backup: bool = True,
+    log_fn=None,
+) -> SyncSubResult:
+    """Chèn video outro vào cuối video track chính (sau điểm kết thúc muộn
+    nhất của toàn bộ timeline), không đụng tới các segment/track hiện có."""
+    _log = log_fn or (lambda msg: None)
+
+    json_path = os.path.join(draft_path, "draft_content.json")
+    if not os.path.isfile(json_path):
+        return SyncSubResult(False, "draft_content.json not found")
+    if not outro_path or not os.path.isfile(outro_path):
+        return SyncSubResult(False, "Outro video not found")
+
+    if backup:
+        bak_path = json_path + ".bak"
+        if not os.path.isfile(bak_path):
+            shutil.copy2(json_path, bak_path)
+            _log("  backup created")
+        else:
+            _log("  backup exists, skipping")
+
+    data = capcut.load_draft_content(draft_path)
+
+    content_tracks = _find_content_video_tracks(data)
+    if len(content_tracks) != 1:
+        return SyncSubResult(
+            False, f"Cần đúng 1 video track chính, tìm thấy {len(content_tracks)}")
+    content_track = content_tracks[0]
+
+    all_ends = [0]
+    for t in data.get("tracks", []):
+        for seg in t.get("segments", []):
+            end = seg["target_timerange"]["start"] + seg["target_timerange"]["duration"]
+            all_ends.append(end)
+    insert_at = max(all_ends)
+
+    info = _get_media_info(outro_path)
+    dur = info["duration"]
+    if dur <= 0:
+        return SyncSubResult(False, "Không đọc được duration outro")
+
+    v_mat = _make_video_material(outro_path, info)
+    data["materials"].setdefault("videos", []).append(v_mat)
+    sp_mat = _make_speed_material()
+    cv_mat = _make_canvas_material()
+    snd_mat = _make_sound_channel()
+    data["materials"].setdefault("speeds", []).append(sp_mat)
+    data["materials"].setdefault("canvases", []).append(cv_mat)
+    data["materials"].setdefault("sound_channel_mappings", []).append(snd_mat)
+
+    seg = _make_video_segment(
+        material_id=v_mat["id"], start=insert_at, duration=dur,
+        speed_id=sp_mat["id"], canvas_id=cv_mat["id"], sound_id=snd_mat["id"],
+    )
+    content_track["segments"].append(seg)
+    content_track["segments"].sort(key=lambda s: s["target_timerange"]["start"])
+
+    data["duration"] = insert_at + dur
+
+    _log(f"  chèn outro tại {insert_at/1e6:.2f}s, dài {dur/1e6:.2f}s "
+         f"({os.path.basename(outro_path)})")
+    capcut.save_draft_content(draft_path, data)
+    _log("  saved OK")
+
+    return SyncSubResult(
+        True,
+        f"Đã chèn outro ({dur/1e6:.1f}s) vào cuối video",
+        sub_count=1,
+    )
+
+
+# ── Chèn Intro ────────────────────────────────────────────────────────
+# Chèn video intro vào ĐẦU video track chính của từng project, khớp theo
+# tên: 'bodycam-video004' → 'intro-video004.mp4' trong thư mục intro.
+
+def resolve_intro_path(intro_folder: str, draft_name: str) -> str | None:
+    """Tìm file intro tương ứng 1 project theo tên.
+
+    Quy tắc chính: đổi tiền tố 'bodycam-' → 'intro-'
+        'bodycam-video004' → 'intro-video004.mp4'
+    Tìm trong chính thư mục intro, và trong '_render/' bên trong nó (nếu có) —
+    một số bộ intro có file final nằm trong '_render/' thay vì ở gốc.
+    Fallback: khớp theo số cuối tên project với file 'intro...<số>.<ext>'.
+    """
+    if not intro_folder or not os.path.isdir(intro_folder):
+        return None
+
+    search_dirs = [intro_folder]
+    render_dir = os.path.join(intro_folder, "_render")
+    if os.path.isdir(render_dir):
+        search_dirs.append(render_dir)
+
+    if draft_name.startswith("bodycam-"):
+        stem = "intro-" + draft_name[len("bodycam-"):]
+        for d in search_dirs:
+            for ext in _OUTRO_VIDEO_EXTS:
+                p = os.path.join(d, stem + ext)
+                if os.path.isfile(p):
+                    return p
+
+    m = re.search(r"(\d+)$", draft_name)
+    if m:
+        num = m.group(1)
+        for d in search_dirs:
+            for f in sorted(os.listdir(d), key=_natural_sort_key):
+                fstem, ext = os.path.splitext(f)
+                if (ext.lower() in _OUTRO_VIDEO_EXTS and "intro" in fstem.lower()
+                        and fstem.lower().endswith(num)):
+                    return os.path.join(d, f)
+
+    return None
+
+
+def preflight_insert_intro(draft_path: str, intro_path: str) -> list[str]:
+    """Kiểm tra input trước khi ghi."""
+    errs = []
+
+    json_path = os.path.join(draft_path, "draft_content.json")
+    if not os.path.isfile(json_path):
+        return ["draft_content.json không tồn tại"]
+
+    if not intro_path or not os.path.isfile(intro_path):
+        return ["Không tìm thấy file intro tương ứng"]
+
+    try:
+        data = capcut.load_draft_content(draft_path)
+    except Exception as e:
+        return [f"Không đọc được draft: {e}"]
+
+    content_tracks = _find_content_video_tracks(data)
+    if len(content_tracks) == 0:
+        errs.append("Không tìm thấy video track chính")
+    elif len(content_tracks) > 1:
+        errs.append(f"Có {len(content_tracks)} video track chính (chỉ hỗ trợ 1) — "
+                     f"kiểm tra lại project")
+
+    return errs
+
+
+def insert_intro(
+    draft_path: str,
+    intro_path: str,
+    backup: bool = True,
+    log_fn=None,
+) -> SyncSubResult:
+    """Chèn video intro vào ĐẦU video track chính, dịch toàn bộ timeline hiện
+    có (mọi track: video, text, audio, effect...) về sau đúng bằng duration
+    của intro."""
+    _log = log_fn or (lambda msg: None)
+
+    json_path = os.path.join(draft_path, "draft_content.json")
+    if not os.path.isfile(json_path):
+        return SyncSubResult(False, "draft_content.json not found")
+    if not intro_path or not os.path.isfile(intro_path):
+        return SyncSubResult(False, "Intro video not found")
+
+    if backup:
+        bak_path = json_path + ".bak"
+        if not os.path.isfile(bak_path):
+            shutil.copy2(json_path, bak_path)
+            _log("  backup created")
+        else:
+            _log("  backup exists, skipping")
+
+    data = capcut.load_draft_content(draft_path)
+
+    content_tracks = _find_content_video_tracks(data)
+    if len(content_tracks) != 1:
+        return SyncSubResult(
+            False, f"Cần đúng 1 video track chính, tìm thấy {len(content_tracks)}")
+    content_track = content_tracks[0]
+
+    info = _get_media_info(intro_path)
+    dur = info["duration"]
+    if dur <= 0:
+        return SyncSubResult(False, "Không đọc được duration intro")
+
+    # Dịch mọi segment ở mọi track về sau đúng bằng duration intro
+    for t in data.get("tracks", []):
+        for seg in t.get("segments", []):
+            seg["target_timerange"]["start"] += dur
+
+    v_mat = _make_video_material(intro_path, info)
+    data["materials"].setdefault("videos", []).append(v_mat)
+    sp_mat = _make_speed_material()
+    cv_mat = _make_canvas_material()
+    snd_mat = _make_sound_channel()
+    data["materials"].setdefault("speeds", []).append(sp_mat)
+    data["materials"].setdefault("canvases", []).append(cv_mat)
+    data["materials"].setdefault("sound_channel_mappings", []).append(snd_mat)
+
+    seg = _make_video_segment(
+        material_id=v_mat["id"], start=0, duration=dur,
+        speed_id=sp_mat["id"], canvas_id=cv_mat["id"], sound_id=snd_mat["id"],
+    )
+    content_track["segments"].append(seg)
+    content_track["segments"].sort(key=lambda s: s["target_timerange"]["start"])
+
+    all_ends = []
+    for t in data["tracks"]:
+        for s in t.get("segments", []):
+            end = s["target_timerange"]["start"] + s["target_timerange"]["duration"]
+            all_ends.append(end)
+    if all_ends:
+        data["duration"] = max(all_ends)
+
+    _log(f"  chèn intro tại 0.00s, dài {dur/1e6:.2f}s, dịch toàn bộ timeline "
+         f"+{dur/1e6:.2f}s ({os.path.basename(intro_path)})")
+    capcut.save_draft_content(draft_path, data)
+    _log("  saved OK")
+
+    return SyncSubResult(
+        True,
+        f"Đã chèn intro ({dur/1e6:.1f}s) vào đầu video, dịch timeline +{dur/1e6:.1f}s",
+        sub_count=1,
+    )
+
+
+# ── Clear Sub + Blur trên video narration / outro / intro ─────────────
+
+_NARRATION_NAME_RE = re.compile(r"^\d+-narration\.[^.]+$", re.IGNORECASE)
+_SUB_OVERLAP_DELETE_RATIO = 0.5
+
+# Blur hiển thị tên theo ngôn ngữ CapCut đang dùng (vd 'Blur', 'Mờ'...) nên
+# so khớp tên không đáng tin — nhận theo resource_id cố định của effect catalog
+# (không đổi theo locale).
+_BLUR_EFFECT_RESOURCE_IDS = {"7399464929830423813"}
+
+
+def _is_narration_or_outro(filename: str) -> bool:
+    low = filename.lower()
+    return (bool(_NARRATION_NAME_RE.match(low))
+            or low.startswith("outro") or low.startswith("intro"))
+
+
+def _merge_ranges(ranges: list[tuple[int, int]]) -> list[tuple[int, int]]:
+    merged = []
+    for s, e in sorted(ranges):
+        if merged and s <= merged[-1][1]:
+            merged[-1] = (merged[-1][0], max(merged[-1][1], e))
+        else:
+            merged.append((s, e))
+    return merged
+
+
+def find_narration_outro_ranges(data: dict) -> list[tuple[int, int]]:
+    """Khoảng thời gian (µs) của các segment video tên '<số>-narration.*',
+    'outro*' và 'intro*'."""
+    vmats = {m["id"]: m for m in data.get("materials", {}).get("videos", [])}
+    ranges = []
+    for t in data.get("tracks", []):
+        if t.get("type") != "video":
+            continue
+        for seg in t.get("segments", []):
+            fname = os.path.basename(vmats.get(seg.get("material_id"), {}).get("path", ""))
+            if fname and _is_narration_or_outro(fname):
+                s = seg["target_timerange"]["start"]
+                ranges.append((s, s + seg["target_timerange"]["duration"]))
+    return _merge_ranges(ranges)
+
+
+def _overlap(a_start: int, a_end: int, ranges: list[tuple[int, int]]) -> int:
+    return sum(max(0, min(a_end, re) - max(a_start, rs)) for rs, re in ranges)
+
+
+def _subtract_ranges(start: int, end: int,
+                     ranges: list[tuple[int, int]]) -> list[tuple[int, int]]:
+    """Phần của [start, end] KHÔNG nằm trong ranges."""
+    pieces = []
+    cursor = start
+    for rs, re in ranges:
+        if re <= cursor or rs >= end:
+            continue
+        if rs > cursor:
+            pieces.append((cursor, rs))
+        cursor = max(cursor, re)
+    if cursor < end:
+        pieces.append((cursor, end))
+    return pieces
+
+
+def _clone_effect_material(mat: dict) -> dict:
+    new_mat = copy.deepcopy(mat)
+    new_mat["id"] = _uid()
+    for mask in new_mat.get("effect_mask") or []:
+        if "id" in mask:
+            mask["id"] = _uid()
+        if mask.get("constant_material_id"):
+            mask["constant_material_id"] = _uid()
+    return new_mat
+
+
+def preflight_clear_sub_blur(draft_path: str) -> list[str]:
+    json_path = os.path.join(draft_path, "draft_content.json")
+    if not os.path.isfile(json_path):
+        return ["draft_content.json không tồn tại"]
+    try:
+        data = capcut.load_draft_content(draft_path)
+    except Exception as e:
+        return [f"Không đọc được draft: {e}"]
+    if not find_narration_outro_ranges(data):
+        return ["Không tìm thấy video '<số>-narration', 'outro' hoặc 'intro' nào trên timeline"]
+    return []
+
+
+def clear_sub_blur(
+    draft_path: str,
+    backup: bool = True,
+    log_fn=None,
+) -> SyncSubResult:
+    """Xoá sub + cắt blur trên các đoạn video '<số>-narration', 'outro' và 'intro'.
+
+    - Sub (text): xoá segment có ≥50% thời lượng nằm trong các đoạn đó.
+    - Blur (effect Blur, nhận theo resource_id — tên hiển thị đổi theo locale
+      CapCut nên không so khớp theo tên): chia segment, bỏ phần trùng các đoạn
+      đó, mỗi đoạn còn lại có material riêng (nhân bản).
+    Project chỉ có sub / chỉ có blur / cả hai đều xử lý phần có; không có gì
+    để làm thì không ghi file.
+    """
+    _log = log_fn or (lambda msg: None)
+
+    json_path = os.path.join(draft_path, "draft_content.json")
+    if not os.path.isfile(json_path):
+        return SyncSubResult(False, "draft_content.json not found")
+
+    data = capcut.load_draft_content(draft_path)
+    ranges = find_narration_outro_ranges(data)
+    if not ranges:
+        return SyncSubResult(
+            False, "Không tìm thấy video '<số>-narration' hoặc 'outro' trên timeline")
+    _log(f"  {len(ranges)} đoạn narration/outro: "
+         + ", ".join(f"{s/1e6:.1f}-{e/1e6:.1f}s" for s, e in ranges))
+
+    # ── Sub ──
+    subs_removed = 0
+    n_text_segs = 0
+    for t in data["tracks"]:
+        if t.get("type") != "text":
+            continue
+        kept = []
+        for seg in t["segments"]:
+            n_text_segs += 1
+            s = seg["target_timerange"]["start"]
+            dur = seg["target_timerange"]["duration"]
+            if dur > 0 and _overlap(s, s + dur, ranges) / dur >= _SUB_OVERLAP_DELETE_RATIO:
+                subs_removed += 1
+            else:
+                kept.append(seg)
+        t["segments"] = kept
+    if n_text_segs == 0:
+        _log("  sub: project không có sub")
+    else:
+        _log(f"  sub: xoá {subs_removed}/{n_text_segs}")
+
+    # ── Blur ──
+    fx_mats = data.get("materials", {}).get("video_effects", [])
+    fx_by_id = {m["id"]: m for m in fx_mats}
+    blur_cut = 0
+    blur_found = 0
+    emptied_tracks = set()
+    for t in data["tracks"]:
+        if t.get("type") != "effect":
+            continue
+        new_segs = []
+        for seg in t["segments"]:
+            mat = fx_by_id.get(seg.get("material_id"))
+            if not mat or not _is_blur_material(mat):
+                new_segs.append(seg)
+                continue
+            blur_found += 1
+            s = seg["target_timerange"]["start"]
+            e = s + seg["target_timerange"]["duration"]
+            pieces = _subtract_ranges(s, e, ranges)
+            if pieces == [(s, e)]:
+                new_segs.append(seg)
+                continue
+            blur_cut += 1
+            for i, (ps, pe) in enumerate(pieces):
+                if i == 0:
+                    piece = seg
+                    piece_mat = mat
+                else:
+                    piece = copy.deepcopy(seg)
+                    piece["id"] = _uid()
+                    piece_mat = _clone_effect_material(mat)
+                    piece["material_id"] = piece_mat["id"]
+                    fx_mats.append(piece_mat)
+                piece["target_timerange"] = {"start": ps, "duration": pe - ps}
+                new_segs.append(piece)
+        t["segments"] = sorted(new_segs, key=lambda x: x["target_timerange"]["start"])
+        if not t["segments"]:
+            emptied_tracks.add(t["id"])
+    if emptied_tracks:
+        data["tracks"] = [t for t in data["tracks"] if t.get("id") not in emptied_tracks]
+    if blur_found == 0:
+        _log("  blur: project không có blur")
+    else:
+        _log(f"  blur: cắt {blur_cut}/{blur_found} segment blur")
+
+    if subs_removed == 0 and blur_cut == 0:
+        return SyncSubResult(True, "Không có sub/blur nào cần xử lý — bỏ qua, không ghi file")
+
+    if backup:
+        bak_path = json_path + ".bak"
+        if not os.path.isfile(bak_path):
+            shutil.copy2(json_path, bak_path)
+            _log("  backup created")
+        else:
+            _log("  backup exists, skipping")
+
+    capcut.save_draft_content(draft_path, data)
+    _log("  saved OK")
+
+    return SyncSubResult(
+        True,
+        f"Đã xoá {subs_removed} sub, cắt {blur_cut} segment blur",
+        sub_count=subs_removed,
+    )
+
+
+# ── Effect narration ──────────────────────────────────────────────────
+# Lấy các effect mẫu (không tính Blur) từ project nguồn đã nằm trên narration,
+# rồi random 1 effect cho mỗi đoạn narration của project đích.
+
+EFFECT_SOURCE_PROJECT = "effect narration"
+
+
+def _is_effect_target_name(fname: str) -> bool:
+    low = fname.lower()
+    return bool(_NARRATION_NAME_RE.match(low)) or low.startswith("intro")
+
+
+def _narration_video_ranges(data: dict) -> list[tuple[int, int]]:
+    vmats = {m["id"]: m for m in data.get("materials", {}).get("videos", [])}
+    ranges = []
+    for t in data.get("tracks", []):
+        if t.get("type") != "video":
+            continue
+        for seg in t.get("segments", []):
+            fname = os.path.basename(vmats.get(seg.get("material_id"), {}).get("path", ""))
+            if _is_effect_target_name(fname):
+                s = seg["target_timerange"]["start"]
+                ranges.append((s, s + seg["target_timerange"]["duration"]))
+    return ranges
+
+
+def _is_blur_material(mat: dict) -> bool:
+    rid = mat.get("resource_id") or mat.get("effect_id") or ""
+    if str(rid) in _BLUR_EFFECT_RESOURCE_IDS:
+        return True
+    return "blur" in str(mat.get("name", "")).lower()
+
+
+def load_narration_effect_pool(source_draft_path: str) -> list[tuple[dict, dict]]:
+    """(material, segment) mẫu, mỗi effect khác nhau 1 lần, lấy từ track effect
+    của project nguồn (bỏ Blur)."""
+    data = capcut.load_draft_content(source_draft_path)
+    fx_by_id = {m["id"]: m for m in data.get("materials", {}).get("video_effects", [])}
+
+    pool = {}
+    for t in data.get("tracks", []):
+        if t.get("type") != "effect":
+            continue
+        for seg in t.get("segments", []):
+            mat = fx_by_id.get(seg.get("material_id"))
+            if not mat or _is_blur_material(mat):
+                continue
+            key = mat.get("resource_id") or mat.get("effect_id") or mat.get("name")
+            pool.setdefault(key, (copy.deepcopy(mat), copy.deepcopy(seg)))
+    return list(pool.values())
+
+
+def preflight_narration_effect(draft_path: str, pool: list) -> list[str]:
+    json_path = os.path.join(draft_path, "draft_content.json")
+    if not os.path.isfile(json_path):
+        return ["draft_content.json không tồn tại"]
+    if not pool:
+        return ["Không lấy được effect mẫu từ project nguồn"]
+    try:
+        data = capcut.load_draft_content(draft_path)
+    except Exception as e:
+        return [f"Không đọc được draft: {e}"]
+    if not _narration_video_ranges(data):
+        return ["Không tìm thấy video '<số>-narration' hoặc 'intro' trên timeline"]
+    return []
+
+
+def apply_narration_effect(
+    draft_path: str,
+    pool: list,
+    backup: bool = True,
+    log_fn=None,
+) -> SyncSubResult:
+    """Với mỗi đoạn '<số>-narration' và 'intro' của project: xoá effect (không phải Blur)
+    đang đè lên đoạn đó, rồi chèn 1 effect random từ pool đúng khoảng thời gian
+    của đoạn narration. Blur và các thứ khác giữ nguyên."""
+    _log = log_fn or (lambda msg: None)
+
+    json_path = os.path.join(draft_path, "draft_content.json")
+    if not os.path.isfile(json_path):
+        return SyncSubResult(False, "draft_content.json not found")
+
+    data = capcut.load_draft_content(draft_path)
+    vmats = {m["id"]: m for m in data.get("materials", {}).get("videos", [])}
+    narr_segs = []
+    for t in data.get("tracks", []):
+        if t.get("type") != "video":
+            continue
+        for seg in t.get("segments", []):
+            fname = os.path.basename(vmats.get(seg.get("material_id"), {}).get("path", ""))
+            if _is_effect_target_name(fname):
+                narr_segs.append(seg)
+    if not narr_segs:
+        return SyncSubResult(False, "Không tìm thấy video '<số>-narration' hoặc 'intro' trên timeline")
+
+    narr_ranges = [(s["target_timerange"]["start"],
+                    s["target_timerange"]["start"] + s["target_timerange"]["duration"])
+                   for s in narr_segs]
+
+    fx_by_id = {m["id"]: m for m in data.get("materials", {}).get("video_effects", [])}
+    removed = 0
+    for t in data["tracks"]:
+        if t.get("type") != "effect":
+            continue
+        kept = []
+        for seg in t["segments"]:
+            mat = fx_by_id.get(seg.get("material_id"))
+            s = seg["target_timerange"]["start"]
+            e = s + seg["target_timerange"]["duration"]
+            if mat and not _is_blur_material(mat) and _overlap(s, e, narr_ranges) > 0:
+                removed += 1
+                continue
+            kept.append(seg)
+        t["segments"] = kept
+
+    eff_track = next((t for t in data["tracks"] if t.get("type") == "effect"), None)
+    if eff_track is None:
+        eff_track = {
+            "id": _uid(), "type": "effect", "segments": [],
+            "flag": 0, "attribute": 0, "name": "", "is_default_name": True,
+        }
+        insert_idx = next((i + 1 for i, t in enumerate(data["tracks"])
+                           if t.get("type") == "video"), len(data["tracks"]))
+        data["tracks"].insert(insert_idx, eff_track)
+
+    added = 0
+    picked = []
+    for seg in narr_segs:
+        mat_tpl, seg_tpl = random.choice(pool)
+        new_mat = copy.deepcopy(mat_tpl)
+        new_mat["id"] = _uid()
+        new_seg = copy.deepcopy(seg_tpl)
+        new_seg["id"] = _uid()
+        new_seg["material_id"] = new_mat["id"]
+        new_seg["target_timerange"] = {
+            "start": seg["target_timerange"]["start"],
+            "duration": seg["target_timerange"]["duration"],
+        }
+        new_mat["bind_segment_id"] = new_seg["id"]
+        data["materials"].setdefault("video_effects", []).append(new_mat)
+        eff_track["segments"].append(new_seg)
+        picked.append(new_mat.get("name", "?"))
+        added += 1
+
+    eff_track["segments"].sort(key=lambda s: s["target_timerange"]["start"])
+
+    if backup:
+        bak_path = json_path + ".bak"
+        if not os.path.isfile(bak_path):
+            shutil.copy2(json_path, bak_path)
+            _log("  backup created")
+        else:
+            _log("  backup exists, skipping")
+
+    capcut.save_draft_content(draft_path, data)
+    _log(f"  saved OK: xoá {removed} effect cũ trên narration, chèn {added} effect mới")
+
+    return SyncSubResult(
+        True,
+        f"Effect narration: chèn {added} effect ({', '.join(sorted(set(picked)))})",
+        sub_count=added,
     )

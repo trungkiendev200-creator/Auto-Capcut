@@ -83,7 +83,7 @@ class AutoCapcut:
 
         self.create_tab_2 = CreateProject2Tab(tabview.add("Create Project 2"), app=self)
         self.cut_percent_tab = CutPercentTab(tabview.add("Cut %"), app=self)
-        self.sync_sub_tab = SyncSubTab(tabview.add("VIP5AE"), app=self)
+        self.sync_sub_tab = SyncSubTab(tabview.add("BODYCAM"), app=self)
 
         log_tab = tabview.add("Log")
         self.log_box = ctk.CTkTextbox(
