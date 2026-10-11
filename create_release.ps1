@@ -29,7 +29,7 @@ if ($Token) {
 }
 
 $repo = $Repo
-$tag = "v1.28.0"
+$tag = "v1.29.0"
 $exePath = "dist\AutoCapCut.exe"
 
 if (-not (Test-Path $exePath)) { throw "Missing $exePath" }
@@ -44,27 +44,39 @@ $headers = @{
 $bodyText = @"
 ## Cap nhat
 
-### Them tab BDC (trong VIP5AE)
-Chay 4 buoc giong 17 PROMAX, khac duy nhat cach map anh law:
-- KHONG can file 3-insert-law-picture.txt nua.
-- Anh dat ten bang so = so narration: 03.png -> audio 3, 20.png -> audio 20.
-- Bo qua anh ten khong phai so, canh bao khi 2 anh trung so audio.
+### BDC (tab BODYCAM) - 4 chuc nang moi
+- **Change Video**: xoa track sub + track anh, thay narration mp3 va video
+  nen chay tren no bang video dung san trong thu muc video-narration/.
+- **Chen Intro/Outro**: chen video intro/outro khop ten voi project
+  (intro-videoNNN.mp4 / outro-videoNNN.mp4), tu dong dich timeline.
+- **clear-sub-blur**: xoa sub va cat effect Blur quanh cac doan
+  narration/outro/intro. Nhan Blur theo resource_id thay vi ten hien thi,
+  nen hoat dong dung du CapCut dang de ngon ngu nao (vd 'Mo' tieng Viet).
+- **Effect narration**: random 1 effect mau (lay tu project 'effect
+  narration') cho moi doan narration/intro.
 
-### On dinh hon cho 17 PROMAX
-- Buoc Xoa SRT: go lo so o cuoi dai (vd 584-592 khi chi co 591 sub) gio chi
-  BO QUA so thua kem canh bao, thay vi bao loi va bo ca project.
-- Them preflight: kiem tra input ca 4 buoc TRUOC khi ghi. Sai thi bo qua
-  project va KHONG dung vao draft, tranh tinh trang lam do dang (da cat va
-  chen audio nhung chua xong cac buoc sau) roi chay lai bi cat chong.
+### Tab Template (trong Caption)
+Luu va ap style caption (font, mau, effect, animation, vi tri) giua cac
+project, giu nguyen noi dung/timing tung caption. Ho tro ca caption thuong
+lan caption da ap Text Template co san cua CapCut.
 
-### Don dep
-- Bo tab Import Data.
-- Bo tab Handle track image.
+### Sua loi
+- parse_delete_input gio nhan ca dinh dang nhieu range cach nhau bang dau
+  phay tren 1 dong (dung format da ghi trong UI tu truoc), truoc day chi
+  nhan duoc moi dong 1 range nen hay bao loi sai khi file duoc gop dong.
+
+### Don dep giao dien
+- Bo man hinh mat khau VIP5AE, doi ten tab thanh BODYCAM.
+- Gop tab Chen Intro va Chen Outro lam 1 cho gon.
+- Bo cac chuc nang khong con dung: Cut & Import, Xoa SRT, Sync Media, Insert
+  Picture, PROMAX (trong BODYCAM); Split Picture, Ani-Trans-Story, Key Frame
+  Nang Cao (trong Sync Audio); Split projects, Split project 2 (trong Create
+  Project 2).
 "@
 
 $payload = @{
     tag_name = $tag
-    name = "v1.28.0 - Them BDC, bo tab Import Data va Handle track image"
+    name = "v1.29.0 - Change Video, Chen Intro/Outro, Template chu, Effect narration"
     body = $bodyText
     draft = $false
     prerelease = $false
